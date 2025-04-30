@@ -67,42 +67,6 @@ const ViewerSchema = new mongoose.Schema({
     buffering: Boolean,
     volume: Number,
   },
-  resources: {
-    cpu: {
-      type: Number,
-      default: 0,
-    },
-    memory: {
-      type: Number,
-      default: 0,
-    },
-    networkRx: {
-      type: Number,
-      default: 0,
-    },
-    networkTx: {
-      type: Number,
-      default: 0,
-    },
-    lastUpdated: {
-      type: Date,
-      default: null,
-    }
-  },
-  resourceLimits: {
-    cpuLimit: {
-      type: Number,
-      default: 100,  // percentage
-    },
-    memoryLimit: {
-      type: Number,
-      default: 500,  // MB
-    },
-    networkLimit: {
-      type: Number,
-      default: 5,    // Mbps
-    }
-  },
   error: {
     type: String,
     default: null,

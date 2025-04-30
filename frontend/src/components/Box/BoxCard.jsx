@@ -8,37 +8,13 @@ import StatusBadge from '../UI/StatusBadge';
 import BoxForm from './BoxForm';
 
 const BoxCard = ({ box }) => {
-  const { startBox, stopBox, deleteBox, setSelectedBox, boxResources } = useAppContext();
+  const { startBox, stopBox, deleteBox, setSelectedBox } = useAppContext();
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
   const navigate = useNavigate();
   
   // Determine the active viewers count
   const activeViewersCount = box.viewers?.filter(v => v.status === 'running').length || 0;
-  
-  // Get resources for this box
-  const resources = boxResources[box._id];
-  
-  const getResourceStatusColor = () => {
-    if (!resources) return 'bg-gray-600';
-    
-    // Check if any resource is above 80% of its limit
-    if (resources.cpu > 80 || 
-        (resources.memory / 1024) > 0.8 || 
-        (resources.networkRx + resources.networkTx) > 16) {
-      return 'bg-red-600';
-    }
-    
-    // Check if any resource is above 60% of its limit
-    if (resources.cpu > 60 || 
-        (resources.memory / 1024) > 0.6 || 
-        (resources.networkRx + resources.networkTx) > 12) {
-      return 'bg-yellow-500';
-    }
-    
-    // Otherwise good
-    return 'bg-green-500';
-  };
   
   const handleViewDetails = () => {
     setSelectedBox(box);
@@ -132,16 +108,6 @@ const BoxCard = ({ box }) => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
                 </svg>
                 <span className="text-gray-600">{box.location}</span>
-              </div>
-            )}
-            
-            {/* Add resource indicator for running boxes */}
-            {box.status === 'running' && resources && (
-              <div className="flex items-center ml-3">
-                <div className={`w-2 h-2 rounded-full ${getResourceStatusColor()}`}></div>
-                <span className="ml-1 text-xs text-gray-400">
-                  {resources ? `${Math.round(resources.cpu)}% CPU` : 'Resources'}
-                </span>
               </div>
             )}
           </div>

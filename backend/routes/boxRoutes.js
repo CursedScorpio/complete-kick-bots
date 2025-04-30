@@ -27,12 +27,6 @@ router.post('/:id/stop', boxController.stopBox);
 // Get box status
 router.get('/:id/status', boxController.getBoxStatus);
 
-// Get box resource usage
-router.get('/:id/resources', boxController.getBoxResourceUsage);
-
-// Update box resource limits
-router.put('/:id/resources/limits', boxController.updateBoxResourceLimits);
-
 // Refresh box IP
 router.post('/:id/refresh-ip', boxController.refreshBoxIp);
 

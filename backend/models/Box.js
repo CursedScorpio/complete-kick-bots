@@ -29,46 +29,6 @@ const BoxSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
-  resources: {
-    cpu: {
-      type: Number,
-      default: 0,
-    },
-    memory: {
-      type: Number,
-      default: 0,
-    },
-    networkRx: {
-      type: Number,
-      default: 0,
-    },
-    networkTx: {
-      type: Number,
-      default: 0,
-    },
-    diskUsage: {
-      type: Number,
-      default: 0,
-    },
-    lastUpdated: {
-      type: Date,
-      default: null,
-    }
-  },
-  resourceLimits: {
-    cpuLimit: {
-      type: Number,
-      default: 80,   // percentage
-    },
-    memoryLimit: {
-      type: Number,
-      default: 1024, // MB
-    },
-    networkLimit: {
-      type: Number,
-      default: 20,   // Mbps
-    }
-  },
   error: {
     type: String,
     default: null,

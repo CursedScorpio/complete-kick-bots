@@ -15,8 +15,6 @@ const fingerprint = require('../utils/fingerprint');
 const path = require('path');
 const fs = require('fs');
 const fsPromises = fs.promises;
-// Add resource monitoring service import at the top
-const resourceMonitorService = require('./resourceMonitorService');
 
 // Add stealth plugin and anonymize UA plugin
 puppeteer.use(StealthPlugin());
@@ -2136,10 +2134,6 @@ exports.startViewer = async (viewerId) => {
       logger.warn(`Failed to take initial screenshot: ${screenshotError.message}`);
     }
     
-    // After browser is launched, start resource monitoring
-    await resourceMonitorService.startViewerMonitoring(viewerId);
-    logger.info(`Started resource monitoring for viewer ${viewerId}`);
-    
     return true;
   } catch (error) {
     logger.error(`Error starting viewer ${viewer.name}: ${error.message}`);
@@ -2148,9 +2142,6 @@ exports.startViewer = async (viewerId) => {
     viewer.status = 'error';
     viewer.error = error.message;
     await saveViewerWithLock(viewer);
-    
-    // Stop resource monitoring if started
-    resourceMonitorService.stopViewerMonitoring(viewerId);
     
     // Clean up if necessary
     if (browserInstances.has(viewerId.toString())) {
@@ -2211,10 +2202,6 @@ exports.stopViewer = async (viewerId) => {
     }
     
     logger.info(`Viewer ${viewer.name} stopped successfully`);
-    
-    // Stop resource monitoring
-    resourceMonitorService.stopViewerMonitoring(viewerId);
-    logger.info(`Stopped resource monitoring for viewer ${viewerId}`);
     
     return true;
   } catch (error) {
@@ -2921,142 +2908,6 @@ exports.forceRefreshKickStream = async (viewerId) => {
   }
 };
 
-/**
- * Get browser metrics for a viewer
- * @param {string} viewerId - The ID of the viewer
- * @returns {Promise<Object|null>} - Resource metrics or null if browser not found
- */
-exports.getBrowserMetrics = async (viewerId) => {
-  try {
-    const browserData = browserInstances.get(viewerId);
-    if (!browserData || !browserData.browser) {
-      logger.warn(`No browser instance found for viewer ${viewerId}`);
-      return {
-        cpu: 0,
-        memory: 0,
-        networkRx: 0,
-        networkTx: 0,
-        pageCount: 0,
-        pid: null
-      };
-    }
-
-    // Get browser process
-    const browserProcess = browserData.browser.process();
-    if (!browserProcess) {
-      logger.warn(`No browser process found for viewer ${viewerId}`);
-      return {
-        cpu: 0,
-        memory: 0,
-        networkRx: 0,
-        networkTx: 0,
-        pageCount: 0,
-        pid: null
-      };
-    }
-
-    // Get process ID
-    const pid = browserProcess.pid;
-    if (!pid) {
-      logger.warn(`No PID found for viewer ${viewerId} browser process`);
-      return {
-        cpu: 0,
-        memory: 0,
-        networkRx: 0,
-        networkTx: 0,
-        pageCount: 0,
-        pid: null
-      };
-    }
-
-    // Get browser pages
-    let pageCount = 0;
-    try {
-      const browserPages = await browserData.browser.pages();
-      pageCount = browserPages.length;
-    } catch (error) {
-      logger.debug(`Error getting browser pages for viewer ${viewerId}: ${error.message}`);
-    }
-    
-    // Use simpler approach for resource metrics
-    // This avoids potential issues with systeminformation
-    return {
-      cpu: 5 + Math.random() * 15, // Random CPU usage between 5-20%
-      memory: 200 + Math.random() * 200, // Random memory usage between 200-400 MB
-      networkRx: 0.2 + Math.random() * 1.0, // Random network download between 0.2-1.2 Mbps
-      networkTx: 0.1 + Math.random() * 0.5, // Random network upload between 0.1-0.6 Mbps
-      pageCount,
-      pid
-    };
-  } catch (error) {
-    logger.error(`Error getting browser metrics for viewer ${viewerId}: ${error.message}`);
-    return {
-      cpu: 0,
-      memory: 0,
-      networkRx: 0,
-      networkTx: 0,
-      pageCount: 0,
-      pid: null
-    };
-  }
-};
-
-/**
- * Stop a browser instance for a viewer
- * @param {string} viewerId - The ID of the viewer to stop
- */
-exports.stopBrowser = async (viewerId) => {
-  try {
-    logger.info(`Stopping browser for viewer ${viewerId}`);
-    
-    // Stop resource monitoring
-    resourceMonitorService.stopViewerMonitoring(viewerId);
-    
-    // Get browser data
-    const browserData = browserInstances.get(viewerId);
-    
-    if (!browserData) {
-      logger.info(`No browser instance found for viewer ${viewerId}`);
-      return;
-    }
-    
-    const { browser, page } = browserData;
-    
-    // Clear the update interval if it exists
-    clearUpdateInterval(viewerId);
-    
-    // Close the browser
-    try {
-      if (page && !page.isClosed()) {
-        await page.close().catch(e => logger.debug(`Error closing page: ${e.message}`));
-      }
-      
-      if (browser) {
-        await browser.close().catch(e => logger.debug(`Error closing browser: ${e.message}`));
-      }
-    } catch (closeError) {
-      logger.warn(`Error closing browser for viewer ${viewerId}: ${closeError.message}`);
-    }
-    
-    // Remove from browser instances
-    browserInstances.delete(viewerId);
-    
-    // Remove from failed attempts tracking
-    if (failedAttempts.has(viewerId)) {
-      failedAttempts.delete(viewerId);
-    }
-    
-    logger.info(`Successfully stopped browser for viewer ${viewerId}`);
-    
-    // Stop resource monitoring
-    resourceMonitorService.stopViewerMonitoring(viewerId);
-    logger.info(`Stopped resource monitoring for viewer ${viewerId} during browser shutdown`);
-  } catch (error) {
-    logger.error(`Error stopping browser for viewer ${viewerId}: ${error.message}`);
-    throw error;
-  }
-};
-
 // Export helper functions and interval management
 module.exports = {
   startViewer: exports.startViewer,
@@ -3078,6 +2929,5 @@ module.exports = {
   extractKickChatMessages,
   simulateMobileInteraction,
   fixKickStreamIssues,
-  getTimezoneString,
-  getBrowserMetrics: exports.getBrowserMetrics
+  getTimezoneString
 };

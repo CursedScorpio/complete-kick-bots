@@ -6,7 +6,6 @@ const vpnService = require('../services/vpnService');
 const puppeteerService = require('../services/puppeteerService');
 const logger = require('../utils/logger');
 const config = require('../config/config');
-const resourceMonitorService = require('../services/resourceMonitorService');
 
 // Get all boxes
 exports.getAllBoxes = async (req, res) => {
@@ -153,9 +152,6 @@ exports.startBox = async (req, res) => {
     box.status = 'starting';
     box.error = null;
     await box.save();
-    
-    // Start resource monitoring for the box
-    await resourceMonitorService.startBoxMonitoring(box._id);
     
     // Start VPN connection async
     vpnService.connectVpn(box._id, box.vpnConfig)
@@ -314,9 +310,6 @@ exports.stopBox = async (req, res) => {
       await viewer.save();
     }
     
-    // Stop resource monitoring
-    resourceMonitorService.stopBoxMonitoring(req.params.id);
-    
     // Disconnect VPN async
     vpnService.disconnectVpn(box._id)
       .then(async () => {
@@ -429,66 +422,5 @@ exports.refreshBoxIp = async (req, res) => {
   } catch (error) {
     logger.error(`Error refreshing box IP: ${error.message}`);
     res.status(500).json({ message: 'Error refreshing box IP', error: error.message });
-  }
-};
-
-// Get box resource usage
-exports.getBoxResourceUsage = async (req, res) => {
-  try {
-    const boxId = req.params.id;
-    
-    // Check if box exists
-    const box = await Box.findById(boxId);
-    if (!box) {
-      return res.status(404).json({ message: 'Box not found' });
-    }
-    
-    // Get resource usage
-    const resourceUsage = await resourceMonitorService.getBoxResourceUsage(boxId);
-    
-    res.status(200).json(resourceUsage);
-  } catch (error) {
-    logger.error(`Error getting box resource usage: ${error.message}`);
-    res.status(500).json({ message: 'Error getting box resource usage', error: error.message });
-  }
-};
-
-// Update box resource limits
-exports.updateBoxResourceLimits = async (req, res) => {
-  try {
-    const boxId = req.params.id;
-    const { cpuLimit, memoryLimit, networkLimit } = req.body;
-    
-    // Check if box exists
-    const box = await Box.findById(boxId);
-    if (!box) {
-      return res.status(404).json({ message: 'Box not found' });
-    }
-    
-    // Validate limits
-    if (cpuLimit !== undefined && (isNaN(cpuLimit) || cpuLimit <= 0 || cpuLimit > 100)) {
-      return res.status(400).json({ message: 'CPU limit must be a number between 1 and 100' });
-    }
-    
-    if (memoryLimit !== undefined && (isNaN(memoryLimit) || memoryLimit <= 0)) {
-      return res.status(400).json({ message: 'Memory limit must be a positive number' });
-    }
-    
-    if (networkLimit !== undefined && (isNaN(networkLimit) || networkLimit <= 0)) {
-      return res.status(400).json({ message: 'Network limit must be a positive number' });
-    }
-    
-    // Update resource limits
-    const limits = {};
-    if (cpuLimit !== undefined) limits.cpuLimit = cpuLimit;
-    if (memoryLimit !== undefined) limits.memoryLimit = memoryLimit;
-    if (networkLimit !== undefined) limits.networkLimit = networkLimit;
-    
-    const updatedLimits = await resourceMonitorService.updateBoxResourceLimits(boxId, limits);
-    
-    res.status(200).json(updatedLimits);
-  } catch (error) {
-    logger.error(`Error updating box resource limits: ${error.message}`);
-    res.status(500).json({ message: 'Error updating box resource limits', error: error.message });
   }
 };
