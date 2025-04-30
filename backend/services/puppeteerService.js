@@ -834,9 +834,48 @@ async function setupRequestInterception(page) {
     const url = request.url().toLowerCase();
     const resourceType = request.resourceType();
     
+    // Critical Kick.com resources that should always be allowed
+    if (url.includes('kick.com') && (
+        url.includes('stream') || 
+        url.includes('player') || 
+        url.includes('chat') || 
+        url.includes('live') ||
+        url.includes('api') ||
+        url.includes('ws') ||
+        url.includes('edge') ||
+        url.includes('cdn') ||
+        url.includes('media') ||
+        url.includes('video') ||
+        url.includes('cast') ||
+        url.includes('/x/') || // Common in Kick resource URLs
+        url.includes('assets') ||
+        url.includes('hls') ||
+        url.includes('m3u8') ||
+        url.includes('.ts')
+      )) {
+      request.continue();
+      return;
+    }
+    
     // Allow through connections to Kick websockets and Datadog - needed for proper stream functionality
-    if (url.includes('websockets.kick.com') || 
-        url.includes('datadoghq.com')) {
+    if (url.includes('websocket') || 
+        url.includes('wss://') || 
+        url.includes('ws://') || 
+        url.includes('media.kick.com') ||
+        url.includes('video.kick.com') ||
+        url.includes('datadoghq.com') ||
+        url.includes('akamaihd.net') ||
+        url.includes('cloudfront.net')) {
+      request.continue();
+      return;
+    }
+    
+    // Critical resource types for streaming should be allowed
+    if (resourceType === 'websocket' || 
+        resourceType === 'media' || 
+        resourceType === 'xhr' || 
+        resourceType === 'fetch' ||
+        (resourceType === 'script' && url.includes('kick.com'))) {
       request.continue();
       return;
     }
@@ -873,15 +912,9 @@ async function setupRequestInterception(page) {
        !url.includes('player') && 
        !url.includes('stream') && 
        !url.includes('logo') && 
-       !url.includes('avatar')) ||
-      resourceType === 'font' ||
-      (resourceType === 'media' && 
-       !url.includes('playlist') && 
-       !url.includes('stream') && 
-       !url.includes('manifest') && 
-       !url.includes('.m3u8') && 
-       !url.includes('.ts') && 
-       !url.includes('.mp4'))
+       !url.includes('avatar') &&
+       !url.includes('kick.com')) ||
+      (resourceType === 'font' && !url.includes('kick.com'))
     ) {
       request.abort();
     } else {
@@ -945,29 +978,6 @@ async function handlePageBarriers(page) {
       }
     }
     
-    // Handle age verification prompts
-    const ageVerificationSelectors = [
-      'button[id*="age-gate"], button[class*="age-gate"]',
-      'button[id*="age"][id*="verify"], button[class*="age"][class*="verify"]',
-      'button:contains("I am over 18"), button:contains("Yes, I am over")',
-      'input[type="date"][id*="birthday"] + button, input[type="date"][class*="birthday"] + button'
-    ];
-    
-    for (const selector of ageVerificationSelectors) {
-      try {
-        const ageButtons = await page.$$(selector);
-        if (ageButtons.length > 0) {
-          logger.info(`Found age verification with selector: ${selector}`);
-          await ageButtons[0].click();
-          await page.waitForTimeout(1000);
-          break;
-        }
-      } catch (error) {
-        // Ignore errors for specific selectors
-        logger.debug(`Failed with age selector ${selector}: ${error.message}`);
-      }
-    }
-    
     // Handle modal dialogs and overlays
     const modalSelectors = [
       'div[role="dialog"] button[aria-label="Close"]',
@@ -992,15 +1002,23 @@ async function handlePageBarriers(page) {
       }
     }
     
-    // Handle "Play" button on videos if they're paused
+    // Try to ensure video autoplay
     try {
       // First try direct play on video element
       await page.evaluate(() => {
-        const videos = document.querySelectorAll('video');
+        const videos = document.querySelectorAll('video, #video-player');
         for (const video of videos) {
           if (video.paused) {
             video.play().catch(() => {});
           }
+          
+          // Make sure it's not muted
+          if (video.muted) {
+            video.muted = false;
+          }
+          
+          // Set volume to 50%
+          video.volume = 0.5;
         }
       });
       
@@ -1038,26 +1056,45 @@ async function handlePageBarriers(page) {
 }
 
 /**
- * Check if a stream is live
+ * Check if a stream is live on Kick.com
  * @param {Object} page - Puppeteer page object
  * @returns {boolean} - Whether the stream is live
  */
 async function checkStreamStatus(page) {
   try {
-    // This implementation is specialized for streaming platforms like Kick.com
+    // This implementation is specialized for Kick.com
     
-    // Check for the video player
+    // Check for the Kick.com video player
     const hasVideo = await page.evaluate(() => {
-      return !!document.querySelector('video') || 
-             !!document.querySelector('iframe[src*="player"]') ||
+      // Check for video element with ID 'video-player' (Kick.com specific)
+      const kickPlayer = document.querySelector('#video-player');
+      if (kickPlayer && !kickPlayer.paused && kickPlayer.readyState > 2) {
+        return true;
+      }
+      
+      // Backup checks for other video players
+      const videos = document.querySelectorAll('video');
+      for (const video of videos) {
+        if (!video.paused && video.readyState > 2) {
+          return true;
+        }
+      }
+      
+      return !!document.querySelector('iframe[src*="player"]') ||
              !!document.querySelector('.stream-player') ||
              !!document.querySelector('.video-js');
     });
     
-    // Check if there's a "Live" indicator 
+    // Check if there's a "Live" indicator specific to Kick.com
     const hasLiveIndicator = await page.evaluate(() => {
-      // Look for elements with text "LIVE" or class containing "live"
-      const liveElements = Array.from(document.querySelectorAll('*')).filter(el => {
+      // Look for Kick.com specific live indicators
+      const liveElements = document.querySelectorAll('.live-indicator, .stream-status--live, .status-live');
+      if (liveElements.length > 0) {
+        return true;
+      }
+      
+      // Fallback to generic live indicators
+      const allElements = Array.from(document.querySelectorAll('*')).filter(el => {
         const text = el.innerText && el.innerText.trim().toUpperCase();
         const classes = el.className && typeof el.className === 'string' ? el.className : '';
         const dataAttrs = el.getAttribute('data-status') || el.getAttribute('data-state') || '';
@@ -1067,11 +1104,18 @@ async function checkStreamStatus(page) {
                dataAttrs === 'live';
       });
       
-      return liveElements.length > 0;
+      return allElements.length > 0;
     });
     
-    // Check if there's any indication the stream is offline
+    // Check for Kick.com specific offline indicators
     const hasOfflineMessage = await page.evaluate(() => {
+      // Look for specific offline indicators for Kick.com
+      const offlineElements = document.querySelectorAll('.offline-indicator, .stream-status--offline, .status-offline');
+      if (offlineElements.length > 0) {
+        return true;
+      }
+      
+      // Fallback to checking page text
       const text = document.body.innerText.toLowerCase();
       
       // Check for common offline indicators
@@ -1089,18 +1133,18 @@ async function checkStreamStatus(page) {
     });
     
     // Debug logging
-    logger.debug(`Stream status check: hasVideo=${hasVideo}, hasLiveIndicator=${hasLiveIndicator}, hasOfflineMessage=${hasOfflineMessage}`);
+    logger.debug(`Kick stream status check: hasVideo=${hasVideo}, hasLiveIndicator=${hasLiveIndicator}, hasOfflineMessage=${hasOfflineMessage}`);
     
-    // Determine if the stream is live
+    // For Kick streams, prioritize the live indicator if video is detected
     return hasVideo && (hasLiveIndicator || !hasOfflineMessage);
   } catch (error) {
-    logger.error(`Failed to check stream status: ${error.message}`);
+    logger.error(`Failed to check Kick stream status: ${error.message}`);
     return false; // Assume not live on error
   }
 }
 
 /**
- * Extract stream information (title, streamer, viewers)
+ * Extract stream information for Kick.com (title, streamer, viewers)
  * @param {Object} page - Puppeteer page object
  * @returns {Object} - Stream metadata
  */
@@ -1110,20 +1154,20 @@ async function extractStreamMetadata(page) {
       const metadata = {};
       
       try {
-        // Stream title - try multiple selectors
+        // Kick.com specific stream title selectors
         const titleSelectors = [
-          'h1[class*="title"]',
-          'div[class*="title"]',
-          'span[title]',
           '.stream-title',
-          '.channel-info__title',
-          'title'
+          '.channel-info-bar__title',
+          '.info-container h3',
+          'h1.video-info__title',
+          '.channel-header h3',
+          '.livestream-title'
         ];
         
         for (const selector of titleSelectors) {
           const element = document.querySelector(selector);
           if (element) {
-            metadata.title = element.innerText || element.textContent || element.getAttribute('title') || '';
+            metadata.title = element.innerText || element.textContent || '';
             if (metadata.title) {
               metadata.title = metadata.title.trim();
               break;
@@ -1131,14 +1175,35 @@ async function extractStreamMetadata(page) {
           }
         }
         
-        // Streamer name
+        // Fallback to generic title selectors
+        if (!metadata.title) {
+          const genericTitleSelectors = [
+            'h1[class*="title"]',
+            'div[class*="title"]',
+            'span[title]',
+            'title'
+          ];
+          
+          for (const selector of genericTitleSelectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+              metadata.title = element.innerText || element.textContent || element.getAttribute('title') || '';
+              if (metadata.title) {
+                metadata.title = metadata.title.trim();
+                break;
+              }
+            }
+          }
+        }
+        
+        // Kick.com specific streamer name selectors
         const streamerSelectors = [
+          '.channel-info-bar__username',
           '.streamer-name',
-          '.channel-header__user-name',
-          'a[href*="/channel/"]',
-          'h1[class*="channel"]',
-          'div[class*="username"]',
-          'div[class*="channel"] h2'
+          '.channel-header__username',
+          '.channel-header a h1',
+          '.creator-name',
+          '.channel-info-bar a[href*="/"]'
         ];
         
         for (const selector of streamerSelectors) {
@@ -1152,12 +1217,34 @@ async function extractStreamMetadata(page) {
           }
         }
         
-        // Game/category
+        // Fallback to generic streamer selectors
+        if (!metadata.streamerName) {
+          const genericStreamerSelectors = [
+            'a[href*="/channel/"]',
+            'h1[class*="channel"]',
+            'div[class*="username"]',
+            'div[class*="channel"] h2'
+          ];
+          
+          for (const selector of genericStreamerSelectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+              metadata.streamerName = element.innerText || element.textContent || '';
+              if (metadata.streamerName) {
+                metadata.streamerName = metadata.streamerName.trim();
+                break;
+              }
+            }
+          }
+        }
+        
+        // Kick.com specific category/game selectors
         const gameSelectors = [
-          'a[href*="/game/"]',
-          'a[href*="/category/"]',
-          '.stream-game-name',
-          '.stream__game'
+          '.category-name',
+          '.category-tag',
+          '.stream-category',
+          '.channel-info-bar__category',
+          'a[href*="/categories/"]'
         ];
         
         for (const selector of gameSelectors) {
@@ -1171,13 +1258,35 @@ async function extractStreamMetadata(page) {
           }
         }
         
-        // Viewer count
+        // Fallback to generic game selectors
+        if (!metadata.game) {
+          const genericGameSelectors = [
+            'a[href*="/game/"]',
+            'a[href*="/category/"]',
+            '.stream-game-name',
+            '.stream__game'
+          ];
+          
+          for (const selector of genericGameSelectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+              metadata.game = element.innerText || element.textContent || '';
+              if (metadata.game) {
+                metadata.game = metadata.game.trim();
+                break;
+              }
+            }
+          }
+        }
+        
+        // Kick.com specific viewer count selectors
         const viewerSelectors = [
           '.viewer-count',
-          '.concurrent-viewers',
-          '[data-a-target="viewer-count"]',
+          '.viewers-count',
+          '.channel-info-bar__viewers',
           '.stream-info-card__text',
-          '.view-count'
+          '.live-indicator-container span',
+          '.indicators span'
         ];
         
         for (const selector of viewerSelectors) {
@@ -1187,6 +1296,13 @@ async function extractStreamMetadata(page) {
             const match = text.match(/(\d[\d,\.]+)\s*(viewer|watching|view)/i);
             if (match) {
               metadata.viewers = parseInt(match[1].replace(/[,\.]/g, ''));
+              break;
+            }
+            
+            // If it's just a number, assume it's viewers
+            const numberMatch = text.match(/^[\s]*(\d[\d,\.]+)[\s]*$/);
+            if (numberMatch) {
+              metadata.viewers = parseInt(numberMatch[1].replace(/[,\.]/g, ''));
               break;
             }
           }
@@ -1207,13 +1323,15 @@ async function extractStreamMetadata(page) {
         }
         
         // Check if the stream is actually live
-        const liveIndicators = document.querySelectorAll('.live, .isLive, [data-a-target="live-indicator"]');
+        const liveIndicators = document.querySelectorAll('.live, .isLive, .live-indicator, .stream-status--live, [data-a-target="live-indicator"]');
         metadata.isLive = liveIndicators.length > 0;
         
         // Duration of stream if available
         const durationSelectors = [
           '.stream-duration',
+          '.stream-uptime',
           '.live-time',
+          '.uptime-indicator',
           '.stream-info-card__time'
         ];
         
@@ -1259,22 +1377,33 @@ async function extractPlaybackStatus(page) {
       };
       
       try {
-        // Find video element
-        const video = document.querySelector('video');
-        if (video) {
-          status.isPlaying = !video.paused && !video.ended && video.currentTime > 0 && video.readyState > 2;
-          status.isPaused = video.paused;
-          status.isBuffering = video.readyState < 3;
-          status.isMuted = video.muted;
-          status.volume = Math.round(video.volume * 100);
+        // Find Kick.com video player by ID
+        const kickVideo = document.querySelector('#video-player');
+        if (kickVideo) {
+          status.isPlaying = !kickVideo.paused && !kickVideo.ended && kickVideo.currentTime > 0 && kickVideo.readyState > 2;
+          status.isPaused = kickVideo.paused;
+          status.isBuffering = kickVideo.readyState < 3;
+          status.isMuted = kickVideo.muted;
+          status.volume = Math.round(kickVideo.volume * 100);
+        } else {
+          // Fallback to generic video element
+          const video = document.querySelector('video');
+          if (video) {
+            status.isPlaying = !video.paused && !video.ended && video.currentTime > 0 && video.readyState > 2;
+            status.isPaused = video.paused;
+            status.isBuffering = video.readyState < 3;
+            status.isMuted = video.muted;
+            status.volume = Math.round(video.volume * 100);
+          }
         }
         
-        // Try to find quality information
+        // Kick.com specific quality selectors
         const qualitySelectors = [
           '.quality-selector button',
+          '.quality-selection-button',
+          '.player-settings-menu .quality-option',
           '.vjs-resolution-button',
-          '[data-a-target="player-settings-menu-item-quality"] span',
-          '.player-controls__settings .quality-button'
+          '.video-quality-selector'
         ];
         
         for (const selector of qualitySelectors) {
@@ -1288,11 +1417,13 @@ async function extractPlaybackStatus(page) {
           }
         }
         
-        // Check for error messages
+        // Kick.com specific error selectors
         const errorSelectors = [
+          '.player-error',
           '.player-error-message',
           '.error-message',
-          '.vjs-error-display'
+          '.vjs-error-display',
+          '.stream-error'
         ];
         
         for (const selector of errorSelectors) {
@@ -1316,7 +1447,7 @@ async function extractPlaybackStatus(page) {
 }
 
 /**
- * Extract chat messages from the stream page
+ * Extract chat messages from the Kick.com stream page
  * @param {Object} page - Puppeteer page object
  * @returns {Array} - Chat messages
  */
@@ -1326,14 +1457,13 @@ async function extractChatMessages(page) {
       const chatMessages = [];
       
       try {
-        // Common selectors for chat messages
+        // Kick.com specific chat container selectors
         const chatContainerSelectors = [
+          '.chat-list',
+          '.chat-messages-container',
+          '.chat-list__message-container',
           '.chat-list__list-container',
-          '.chat-window__messages',
-          '.chat-scrollable-area__message-container',
-          '.stream-chat',
-          '.vjs-comment-list',
-          '#chat-room-header-label'
+          '.chatroom div[class*="scrollable"]'
         ];
         
         let chatContainer = null;
@@ -1342,15 +1472,31 @@ async function extractChatMessages(page) {
           if (chatContainer) break;
         }
         
+        // Fallback to generic chat containers
+        if (!chatContainer) {
+          const genericContainers = [
+            '.chat-window__messages',
+            '.chat-scrollable-area__message-container',
+            '.stream-chat',
+            '.vjs-comment-list',
+            '#chat-room-header-label'
+          ];
+          
+          for (const selector of genericContainers) {
+            chatContainer = document.querySelector(selector);
+            if (chatContainer) break;
+          }
+        }
+        
         if (!chatContainer) return chatMessages;
         
-        // Try different message selectors
+        // Kick.com specific message selectors
         const messageSelectors = [
           '.chat-entry',
-          '.chat-line',
-          '.chat-line__message',
+          '.chat-message',
           '.message',
-          '.chat-message'
+          '.chat-message-item',
+          '.chat-list__message'
         ];
         
         let messageElements = [];
@@ -1359,33 +1505,59 @@ async function extractChatMessages(page) {
           if (messageElements.length > 0) break;
         }
         
+        // Fallback to generic message selectors
+        if (messageElements.length === 0) {
+          const genericMessageSelectors = [
+            '.chat-line',
+            '.chat-line__message',
+            '.message'
+          ];
+          
+          for (const selector of genericMessageSelectors) {
+            messageElements = chatContainer.querySelectorAll(selector);
+            if (messageElements.length > 0) break;
+          }
+        }
+        
         // Process the last 50 messages (or fewer if not that many)
         const start = Math.max(0, messageElements.length - 50);
         
         for (let i = start; i < messageElements.length; i++) {
           const messageEl = messageElements[i];
           
-          // Extract username
+          // Extract username - Kick.com specific
           let username = '';
-          const usernameEl = messageEl.querySelector('.chat-author, .chat-author__display-name, .chat-line__username, .username');
+          const usernameEl = messageEl.querySelector('.chat-message-sender, .chat-entry__username, .chat-author, .username-container');
           if (usernameEl) {
             username = usernameEl.innerText || usernameEl.textContent || '';
+          } else {
+            // Fallback to generic username selectors
+            const genericUsernameEl = messageEl.querySelector('.chat-author__display-name, .chat-line__username, .username');
+            if (genericUsernameEl) {
+              username = genericUsernameEl.innerText || genericUsernameEl.textContent || '';
+            }
           }
           
-          // Extract message text
+          // Extract message text - Kick.com specific
           let messageText = '';
-          const textEl = messageEl.querySelector('.chat-line__message-body, .message-body, .chat-message__message, .text-fragment');
+          const textEl = messageEl.querySelector('.chat-message-content, .chat-entry__message, .message-content');
           if (textEl) {
             messageText = textEl.innerText || textEl.textContent || '';
           } else {
-            // If no specific text element found, try to extract text after username
-            const fullText = messageEl.innerText || messageEl.textContent || '';
-            if (username && fullText.includes(username)) {
-              messageText = fullText.substring(fullText.indexOf(username) + username.length).trim();
-              // Remove colons and other common separators
-              messageText = messageText.replace(/^[:\->\s]+/, '').trim();
+            // Fallback to generic text selectors
+            const genericTextEl = messageEl.querySelector('.chat-line__message-body, .message-body, .chat-message__message, .text-fragment');
+            if (genericTextEl) {
+              messageText = genericTextEl.innerText || genericTextEl.textContent || '';
             } else {
-              messageText = fullText;
+              // If no specific text element found, try to extract text after username
+              const fullText = messageEl.innerText || messageEl.textContent || '';
+              if (username && fullText.includes(username)) {
+                messageText = fullText.substring(fullText.indexOf(username) + username.length).trim();
+                // Remove colons and other common separators
+                messageText = messageText.replace(/^[:\->\s]+/, '').trim();
+              } else {
+                messageText = fullText;
+              }
             }
           }
           
@@ -1394,7 +1566,7 @@ async function extractChatMessages(page) {
           
           // Extract timestamp if available
           let timestamp = Date.now();
-          const timeEl = messageEl.querySelector('.chat-timestamp, .timestamp');
+          const timeEl = messageEl.querySelector('.chat-message-time, .chat-timestamp, .timestamp');
           if (timeEl) {
             const timeText = timeEl.innerText || timeEl.textContent || '';
             if (timeText) {
@@ -1419,11 +1591,12 @@ async function extractChatMessages(page) {
             }
           }
           
-          // Check for badges/roles
+          // Check for badges/roles - Kick.com specific
           let isModerator = false;
           let isSubscriber = false;
           
-          const badgeEls = messageEl.querySelectorAll('.badge, .chat-badge');
+          // Kick specific badge classes
+          const badgeEls = messageEl.querySelectorAll('.badge, .chat-badge, .role-badge, .user-role-badge');
           for (const badgeEl of badgeEls) {
             const badgeText = badgeEl.innerText || badgeEl.textContent || '';
             const badgeClass = badgeEl.className || '';
@@ -1431,12 +1604,14 @@ async function extractChatMessages(page) {
             isModerator = isModerator || 
                            badgeText.includes('MOD') || 
                            badgeClass.includes('moderator') ||
-                           badgeClass.includes('mod-badge');
+                           badgeClass.includes('mod-badge') ||
+                           badgeClass.includes('role-badge--moderator');
             
             isSubscriber = isSubscriber || 
                            badgeText.includes('SUB') || 
                            badgeClass.includes('subscriber') ||
-                           badgeClass.includes('sub-badge');
+                           badgeClass.includes('sub-badge') ||
+                           badgeClass.includes('role-badge--subscriber');
           }
           
           chatMessages.push({
@@ -1518,7 +1693,9 @@ exports.startViewer = async (viewerId) => {
         '--disable-features=IsolateOrigins,site-per-process',
         '--disable-blink-features=AutomationControlled',
         '--ignore-certificate-errors',
-        `--user-agent=${browserFingerprint.userAgent}`
+        `--user-agent=${browserFingerprint.userAgent}`,
+        '--autoplay-policy=no-user-gesture-required', // Important for auto-playing video
+        '--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies' // Help with autoplay
       ],
       ignoreHTTPSErrors: true,
       defaultViewport: {
@@ -1541,7 +1718,7 @@ exports.startViewer = async (viewerId) => {
     // Apply advanced fingerprinting to make the browser appear more human-like
     await applyAdvancedFingerprinting(page, browserFingerprint);
     
-    // Set up request interception to block trackers and analytics
+    // Set up request interception to allow essential Kick.com resources and block tracking
     await setupRequestInterception(page);
     
     // Add error handling for unexpected browser disconnection
@@ -1592,29 +1769,44 @@ exports.startViewer = async (viewerId) => {
     
     // Navigate to the stream URL with enhanced timeouts and options
     await page.goto(viewer.streamUrl, { 
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded', // Initial load with domcontentloaded
       timeout: 60000 // 60 seconds timeout
     });
     
-    // Handle potential barriers (cookie consent, age verification, etc.)
+    // Wait for necessary resources to load
+    await page.waitForTimeout(5000);
+    
+    // Now wait for network to be idle - this helps with dynamic content loading
+    try {
+      await page.waitForNavigation({ 
+        waitUntil: 'networkidle2', 
+        timeout: 15000 
+      }).catch(() => {}); // We'll continue even if this times out
+    } catch (error) {
+      logger.debug(`Network idle timeout for ${viewer.name}: ${error.message}`);
+    }
+    
+    // Handle potential barriers (cookie consent, etc.)
     await handlePageBarriers(page);
+    
+    // Kick.com specific video player selectors in priority order
+    const kickVideoSelectors = [
+      '#video-player',
+      '.player-no-controls',
+      '.stream-player video',
+      '.video-js video',
+      '.kick-player video',
+      '.channel-live video',
+      'video'
+    ];
     
     // Try to wait for video player with different selectors
     let videoPlayerFound = false;
-    const videoSelectors = [
-      '#video-player', 
-      'video', 
-      '.live-stream-player', 
-      '.video-js', 
-      'iframe[src*="player"]',
-      '.player-element',
-      '[data-a-target="player"]'
-    ];
     const timeout = config.puppeteer.defaultTimeout || 30000;
     
-    for (const selector of videoSelectors) {
+    for (const selector of kickVideoSelectors) {
       try {
-        await page.waitForSelector(selector, { timeout: timeout / videoSelectors.length });
+        await page.waitForSelector(selector, { timeout: timeout / kickVideoSelectors.length });
         logger.info(`Video player found with selector "${selector}" for viewer ${viewer.name}`);
         videoPlayerFound = true;
         break;
@@ -1628,7 +1820,7 @@ exports.startViewer = async (viewerId) => {
       const frames = page.frames();
       for (const frame of frames) {
         try {
-          for (const selector of videoSelectors) {
+          for (const selector of kickVideoSelectors) {
             const element = await frame.$(selector);
             if (element) {
               logger.info(`Video player found in iframe with selector "${selector}" for viewer ${viewer.name}`);
@@ -1652,35 +1844,61 @@ exports.startViewer = async (viewerId) => {
       await page.screenshot({ path: screenshotPath, fullPage: true });
       logger.info(`Debug screenshot saved at ${screenshotPath}`);
       
+      // Get page HTML for debugging
+      const pageHtml = await page.content();
+      logger.debug(`Page HTML for failed video player detection: ${pageHtml.substring(0, 500)}...`);
+      
       throw new Error('Video player not found after trying multiple selectors');
     }
     
-    // Try to play the stream if it's not already playing
+    // Try to play the stream more aggressively - Kick.com specific approach
     await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video && video.paused) {
-        video.play().catch(e => console.error('Error playing video:', e));
+      // Try direct approach for Kick.com video player
+      try {
+        const kickVideo = document.querySelector('#video-player');
+        if (kickVideo) {
+          kickVideo.play().catch(e => console.error('Error playing Kick video:', e));
+          kickVideo.muted = false;
+          kickVideo.volume = 0.5;
+          kickVideo.controls = true;
+          kickVideo.autoplay = true;
+        } else {
+          // Fallback to any video element
+          const videos = document.querySelectorAll('video');
+          for (const video of videos) {
+            video.play().catch(e => console.error('Error playing video:', e));
+            video.muted = false;
+            video.volume = 0.5;
+            video.controls = true;
+            video.autoplay = true;
+          }
+        }
+      } catch (e) {
+        console.error('Error while attempting to play video:', e);
       }
       
-      // Try to click any play buttons
-      const playButtons = [
-        document.querySelector('button[aria-label="Play"]'),
-        document.querySelector('.play-button'),
-        document.querySelector('.vjs-play-control'),
-        document.querySelector('[data-a-target="player-play-pause-button"]'),
-        ...Array.from(document.querySelectorAll('button')).filter(b => 
-          (b.innerText || '').toLowerCase().includes('play') || 
-          (b.title || '').toLowerCase().includes('play') ||
-          (b.ariaLabel || '').toLowerCase().includes('play')
-        )
-      ].filter(Boolean);
-      
-      for (const button of playButtons) {
-        try {
-          button.click();
-        } catch (e) {
-          // Ignore click errors
+      // Try to click any play buttons - Kick.com specific
+      try {
+        const kickPlayButtons = [
+          document.querySelector('.play-button'),
+          document.querySelector('.vjs-big-play-button'),
+          document.querySelector('.player-control-playpause'),
+          ...Array.from(document.querySelectorAll('button')).filter(b => 
+            (b.innerText || '').toLowerCase().includes('play') || 
+            (b.title || '').toLowerCase().includes('play') ||
+            (b.ariaLabel || '').toLowerCase().includes('play')
+          )
+        ].filter(Boolean);
+        
+        for (const button of kickPlayButtons) {
+          try {
+            button.click();
+          } catch (e) {
+            // Ignore click errors
+          }
         }
+      } catch (e) {
+        console.error('Error while clicking play buttons:', e);
       }
     });
     
@@ -1793,29 +2011,44 @@ exports.navigateToStream = async (viewerId, streamUrl) => {
     
     // Navigate to the new stream URL
     await page.goto(streamUrl, { 
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded', // Initial load with domcontentloaded
       timeout: 60000 // 60 seconds timeout
     });
     
-    // Handle potential barriers (cookie consent, age verification, etc.)
+    // Wait for necessary resources to load
+    await page.waitForTimeout(5000);
+    
+    // Now wait for network to be idle - this helps with dynamic content loading
+    try {
+      await page.waitForNavigation({ 
+        waitUntil: 'networkidle2', 
+        timeout: 15000 
+      }).catch(() => {}); // We'll continue even if this times out
+    } catch (error) {
+      logger.debug(`Network idle timeout for ${viewer.name}: ${error.message}`);
+    }
+    
+    // Handle potential barriers (cookie consent, etc.)
     await handlePageBarriers(page);
+    
+    // Kick.com specific video player selectors in priority order
+    const kickVideoSelectors = [
+      '#video-player',
+      '.player-no-controls',
+      '.stream-player video',
+      '.video-js video',
+      '.kick-player video',
+      '.channel-live video',
+      'video'
+    ];
     
     // Try to wait for video player with different selectors
     let videoPlayerFound = false;
-    const videoSelectors = [
-      '#video-player', 
-      'video', 
-      '.live-stream-player', 
-      '.video-js', 
-      'iframe[src*="player"]',
-      '.player-element',
-      '[data-a-target="player"]'
-    ];
     const timeout = config.puppeteer.defaultTimeout || 30000;
     
-    for (const selector of videoSelectors) {
+    for (const selector of kickVideoSelectors) {
       try {
-        await page.waitForSelector(selector, { timeout: timeout / videoSelectors.length });
+        await page.waitForSelector(selector, { timeout: timeout / kickVideoSelectors.length });
         logger.info(`Video player found with selector "${selector}" for viewer ${viewer.name}`);
         videoPlayerFound = true;
         break;
@@ -1829,7 +2062,7 @@ exports.navigateToStream = async (viewerId, streamUrl) => {
       const frames = page.frames();
       for (const frame of frames) {
         try {
-          for (const selector of videoSelectors) {
+          for (const selector of kickVideoSelectors) {
             const element = await frame.$(selector);
             if (element) {
               logger.info(`Video player found in iframe with selector "${selector}" for viewer ${viewer.name}`);
@@ -1853,35 +2086,61 @@ exports.navigateToStream = async (viewerId, streamUrl) => {
       await page.screenshot({ path: screenshotPath, fullPage: true });
       logger.info(`Debug screenshot saved at ${screenshotPath}`);
       
+      // Get page HTML for debugging
+      const pageHtml = await page.content();
+      logger.debug(`Page HTML for failed video player detection: ${pageHtml.substring(0, 500)}...`);
+      
       throw new Error('Video player not found after trying multiple selectors');
     }
     
-    // Try to play the stream if it's not already playing
+    // Try to play the stream more aggressively - Kick.com specific approach
     await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video && video.paused) {
-        video.play().catch(e => console.error('Error playing video:', e));
+      // Try direct approach for Kick.com video player
+      try {
+        const kickVideo = document.querySelector('#video-player');
+        if (kickVideo) {
+          kickVideo.play().catch(e => console.error('Error playing Kick video:', e));
+          kickVideo.muted = false;
+          kickVideo.volume = 0.5;
+          kickVideo.controls = true;
+          kickVideo.autoplay = true;
+        } else {
+          // Fallback to any video element
+          const videos = document.querySelectorAll('video');
+          for (const video of videos) {
+            video.play().catch(e => console.error('Error playing video:', e));
+            video.muted = false;
+            video.volume = 0.5;
+            video.controls = true;
+            video.autoplay = true;
+          }
+        }
+      } catch (e) {
+        console.error('Error while attempting to play video:', e);
       }
       
-      // Try to click any play buttons
-      const playButtons = [
-        document.querySelector('button[aria-label="Play"]'),
-        document.querySelector('.play-button'),
-        document.querySelector('.vjs-play-control'),
-        document.querySelector('[data-a-target="player-play-pause-button"]'),
-        ...Array.from(document.querySelectorAll('button')).filter(b => 
-          (b.innerText || '').toLowerCase().includes('play') || 
-          (b.title || '').toLowerCase().includes('play') ||
-          (b.ariaLabel || '').toLowerCase().includes('play')
-        )
-      ].filter(Boolean);
-      
-      for (const button of playButtons) {
-        try {
-          button.click();
-        } catch (e) {
-          // Ignore click errors
+      // Try to click any play buttons - Kick.com specific
+      try {
+        const kickPlayButtons = [
+          document.querySelector('.play-button'),
+          document.querySelector('.vjs-big-play-button'),
+          document.querySelector('.player-control-playpause'),
+          ...Array.from(document.querySelectorAll('button')).filter(b => 
+            (b.innerText || '').toLowerCase().includes('play') || 
+            (b.title || '').toLowerCase().includes('play') ||
+            (b.ariaLabel || '').toLowerCase().includes('play')
+          )
+        ].filter(Boolean);
+        
+        for (const button of kickPlayButtons) {
+          try {
+            button.click();
+          } catch (e) {
+            // Ignore click errors
+          }
         }
+      } catch (e) {
+        console.error('Error while clicking play buttons:', e);
       }
     });
     
@@ -2122,8 +2381,10 @@ async function setupPageEventListeners(page, viewer) {
     const status = response.status();
     const url = response.url();
     
-    // Only log failed responses or important responses
-    if (status >= 400 || url.includes('auth') || url.includes('login') || url.includes('stream')) {
+    // Only log failed responses or important responses for Kick.com
+    if ((status >= 400 || url.includes('auth') || url.includes('login') || url.includes('stream') || 
+         url.includes('chat') || url.includes('video') || url.includes('player')) &&
+        url.includes('kick.com')) {
       logger.debug(`Response ${status} for ${url} (${viewer.name})`);
       
       // For certain critical errors, log them to the viewer logs
@@ -2167,13 +2428,16 @@ async function setupPageEventListeners(page, viewer) {
   // Handle frame navigation for detecting redirects
   page.on('framenavigated', async (frame) => {
     if (frame === page.mainFrame()) {
-      logger.debug(`Main frame navigated to: ${frame.url()} (${viewer.name})`);
+      const url = frame.url();
+      if (url.includes('kick.com')) {
+        logger.debug(`Main frame navigated to: ${url} (${viewer.name})`);
+      }
     }
   });
 }
 
 /**
- * Start update interval for a viewer
+ * Start an update interval for a viewer
  * @param {string} viewerId - ID of the viewer
  */
 function startUpdateInterval(viewerId) {
@@ -2183,15 +2447,15 @@ function startUpdateInterval(viewerId) {
   // Create a new interval
   updateIntervals[viewerId] = setInterval(async () => {
     try {
-      await updateViewerData(viewerId);
+      await updateViewerStatus(viewerId);
     } catch (error) {
       logger.error(`Error updating viewer ${viewerId}: ${error.message}`);
     }
-  }, config.viewer.updateInterval || 30000);
+  }, config.puppeteer.updateInterval || 30000);
 }
 
 /**
- * Clear update interval for a viewer
+ * Clear the update interval for a viewer
  * @param {string} viewerId - ID of the viewer
  */
 function clearUpdateInterval(viewerId) {
@@ -2202,255 +2466,128 @@ function clearUpdateInterval(viewerId) {
 }
 
 /**
- * Update viewer data
+ * Update the status of a viewer
  * @param {string} viewerId - ID of the viewer
  */
-async function updateViewerData(viewerId) {
+async function updateViewerStatus(viewerId) {
   const viewer = await Viewer.findById(viewerId);
   
   if (!viewer || viewer.status !== 'running') {
+    clearUpdateInterval(viewerId);
     return;
   }
   
   if (!browserInstances.has(viewerId.toString())) {
+    logger.warn(`Browser instance not found for viewer ${viewer.name}`);
+    
+    // Update viewer status
+    viewer.status = 'error';
+    viewer.error = 'Browser instance not found';
+    await saveViewerWithLock(viewer);
+    
+    clearUpdateInterval(viewerId);
     return;
   }
   
-  const { page } = browserInstances.get(viewerId.toString());
-  
   try {
-    // Perform some human-like interaction occasionally
-    if (Math.random() < 0.2) { // 20% chance of interaction
-      await simulateHumanInteraction(page);
+    const { page } = browserInstances.get(viewerId.toString());
+    
+    // Check if page is closed
+    if (page.isClosed()) {
+      logger.warn(`Page is closed for viewer ${viewer.name}`);
+      
+      // Update viewer status
+      viewer.status = 'error';
+      viewer.error = 'Page is closed';
+      await saveViewerWithLock(viewer);
+      
+      clearUpdateInterval(viewerId);
+      return;
     }
     
-    // Check if stream is still live
+    // Check if the stream is live
     const isLive = await checkStreamStatus(page);
     
-    // Extract stream metadata
+    // Extract stream information
     const streamMetadata = await extractStreamMetadata(page);
     
     // Extract playback status
     const playbackStatus = await extractPlaybackStatus(page);
     
-    // Extract chat messages if this viewer has chat parsing enabled
-    if (viewer.isParseChatEnabled) {
-      try {
-        const chatMessages = await extractChatMessages(page);
+    // Extract chat messages
+    const chatMessages = await extractChatMessages(page);
+    
+    // Update viewer with new information
+    viewer.streamMetadata = streamMetadata;
+    viewer.playbackStatus = playbackStatus;
+    viewer.lastActivityAt = new Date();
+    
+    // Store last few chat messages
+    if (chatMessages.length > 0) {
+      // Only store the last 50 messages
+      viewer.chatMessages = chatMessages.slice(-50);
+    }
+    
+    await saveViewerWithLock(viewer);
+    
+    // Update the stream document
+    if (viewer.streamUrl) {
+      const stream = await Stream.findOne({ url: viewer.streamUrl });
+      if (stream) {
+        stream.title = streamMetadata.title || stream.title;
+        stream.game = streamMetadata.game || stream.game;
+        stream.viewers = streamMetadata.viewers || stream.viewers;
+        stream.isLive = isLive;
         
-        // Update stream with chat messages
-        if (chatMessages && chatMessages.length > 0) {
-          await Stream.updateOne(
-            { url: viewer.streamUrl },
-            { 
-              $push: { 
-                chatMessages: {
-                  $each: chatMessages.map(msg => ({
-                    ...msg,
-                    viewerId: viewer._id
-                  })),
-                  $slice: -1000 // Keep the most recent 1000 messages
-                }
-              },
-              title: streamMetadata.title || '',
-              game: streamMetadata.game || '',
-              viewers: streamMetadata.viewers || 0,
-              isLive: isLive,
-              lastUpdated: new Date()
-            }
-          );
+        // Make sure this viewer is in the active viewers
+        if (!stream.activeViewers.includes(viewer._id)) {
+          stream.activeViewers.push(viewer._id);
         }
-      } catch (chatError) {
-        logger.debug(`Error extracting chat: ${chatError.message}`);
+        
+        await stream.save();
       }
     }
     
-    // Take a screenshot occasionally (2% chance or every 30th update)
-    const viewerUpdateCount = viewer.updateCount || 0;
-    if (Math.random() < 0.02 || viewerUpdateCount % 30 === 0) {
+    // Take a screenshot occasionally (every ~5 minutes)
+    if (Math.random() < 0.1) {
       try {
         await exports.takeScreenshot(viewerId);
       } catch (screenshotError) {
-        logger.debug(`Failed to take periodic screenshot: ${screenshotError.message}`);
+        logger.warn(`Failed to take periodic screenshot: ${screenshotError.message}`);
       }
     }
     
-    // Update stream data if it has changed
-    if (streamMetadata.title || streamMetadata.game || streamMetadata.viewers) {
-      await Stream.updateOne(
-        { url: viewer.streamUrl },
-        {
-          $set: {
-            title: streamMetadata.title || undefined,
-            game: streamMetadata.game || undefined,
-            viewers: streamMetadata.viewers || undefined,
-            isLive: isLive,
-            lastUpdated: new Date()
-          }
-        }
-      );
-    }
-    
-    // Update viewer data
-    viewer.streamMetadata = {
-      ...viewer.streamMetadata,
-      ...streamMetadata,
-      isLive
-    };
-    viewer.playbackStatus = playbackStatus;
-    viewer.lastActivityAt = new Date();
-    viewer.updateCount = (viewerUpdateCount + 1);
-    await saveViewerWithLock(viewer);
-    
-    // Handle stream going offline
-    if (!isLive && playbackStatus.error) {
-      logger.warn(`Stream appears to be offline for viewer ${viewer.name}: ${playbackStatus.error}`);
-      
-      // Add to viewer logs
-      viewer.logs.push({
-        level: 'warn',
-        message: `Stream offline: ${playbackStatus.error}`,
-      });
-      
-      // If too many logs, remove oldest
-      if (viewer.logs.length > 100) {
-        viewer.logs = viewer.logs.slice(-100);
-      }
-      
+    // If playback is stuck with an error, try to refresh
+    if (playbackStatus.error && !viewer.lastRefreshAt) {
+      logger.info(`Playback error detected for ${viewer.name}, refreshing...`);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await handlePageBarriers(page);
+      viewer.lastRefreshAt = new Date();
       await saveViewerWithLock(viewer);
-      
-      // Optional: Attempt to reload the page if stream is offline
-      if (Math.random() < 0.5) { // 50% chance to reload
-        logger.info(`Reloading page for offline stream for viewer ${viewer.name}`);
-        try {
-          await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
-          await handlePageBarriers(page);
-        } catch (reloadError) {
-          logger.warn(`Error reloading page: ${reloadError.message}`);
-        }
+    } else if (playbackStatus.error && viewer.lastRefreshAt) {
+      // If we already tried refreshing and still have errors
+      const timeSinceRefresh = new Date() - new Date(viewer.lastRefreshAt);
+      if (timeSinceRefresh > 5 * 60 * 1000) {
+        // More than 5 minutes since last refresh, try again
+        logger.info(`Playback still has errors for ${viewer.name}, refreshing again...`);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await handlePageBarriers(page);
+        viewer.lastRefreshAt = new Date();
+        await saveViewerWithLock(viewer);
       }
+    } else if (!playbackStatus.error && viewer.lastRefreshAt) {
+      // Clear the lastRefreshAt if we no longer have errors
+      viewer.lastRefreshAt = null;
+      await saveViewerWithLock(viewer);
     }
   } catch (error) {
-    logger.error(`Error updating data for viewer ${viewer.name}: ${error.message}`);
+    logger.error(`Error updating viewer ${viewer.name}: ${error.message}`);
     
-    // Add to viewer logs
-    viewer.logs.push({
-      level: 'error',
-      message: `Update error: ${error.message}`,
-    });
-    
-    // If too many logs, remove oldest
-    if (viewer.logs.length > 100) {
-      viewer.logs = viewer.logs.slice(-100);
-    }
-    
+    // Update viewer error
+    viewer.error = error.message;
     await saveViewerWithLock(viewer);
   }
 }
 
-/**
- * Simulate human-like interaction on the page
- * @param {Object} page - Puppeteer page object
- */
-async function simulateHumanInteraction(page) {
-  try {
-    // Random actions to perform
-    const actions = [
-      // Scroll down a bit
-      async () => {
-        const scrollAmount = Math.floor(Math.random() * 300) + 100;
-        await page.evaluate(amount => {
-          window.scrollBy(0, amount);
-        }, scrollAmount);
-      },
-      
-      // Scroll up a bit
-      async () => {
-        const scrollAmount = Math.floor(Math.random() * 200) + 50;
-        await page.evaluate(amount => {
-          window.scrollBy(0, -amount);
-        }, scrollAmount);
-      },
-      
-      // Move mouse randomly
-      async () => {
-        const viewportSize = await page.viewport();
-        const x = Math.floor(Math.random() * viewportSize.width);
-        const y = Math.floor(Math.random() * viewportSize.height);
-        await page.mouse.move(x, y);
-      },
-      
-      // Click volume control occasionally
-      async () => {
-        const volumeSelectors = [
-          '.volume-control',
-          '.vjs-volume-control',
-          '.volume-panel',
-          '[data-a-target="player-volume-control"]'
-        ];
-        
-        for (const selector of volumeSelectors) {
-          try {
-            const volumeControl = await page.$(selector);
-            if (volumeControl) {
-              const boundingBox = await volumeControl.boundingBox();
-              if (boundingBox) {
-                // Click near the middle of the volume control
-                await page.mouse.click(
-                  boundingBox.x + boundingBox.width / 2,
-                  boundingBox.y + boundingBox.height / 2
-                );
-                break;
-              }
-            }
-          } catch (error) {
-            // Ignore errors for individual selectors
-          }
-        }
-      },
-      
-      // Click somewhere in empty space
-      async () => {
-        const viewportSize = await page.viewport();
-        // Click in the bottom right quarter of the screen
-        const x = Math.floor(viewportSize.width * 0.75 + Math.random() * (viewportSize.width * 0.25));
-        const y = Math.floor(viewportSize.height * 0.75 + Math.random() * (viewportSize.height * 0.25));
-        await page.mouse.click(x, y);
-      }
-    ];
-    
-    // Choose a random action
-    const randomAction = actions[Math.floor(Math.random() * actions.length)];
-    await randomAction();
-    
-    // Add a natural pause
-    const pauseTime = Math.floor(Math.random() * 1000) + 500;
-    await page.waitForTimeout(pauseTime);
-  } catch (error) {
-    logger.debug(`Error simulating human interaction: ${error.message}`);
-    // Ignore errors in human simulation
-  }
-}
-
-// Export helper functions and interval management
-module.exports = {
-  startViewer: exports.startViewer,
-  navigateToStream: exports.navigateToStream,
-  stopViewer: exports.stopViewer,
-  takeScreenshot: exports.takeScreenshot,
-  saveViewerWithLock,  // Add this line to include saveViewerWithLock
-  startUpdateInterval,
-  clearUpdateInterval,
-  updateViewerData,
-  applyAdvancedFingerprinting,
-  generateAdvancedFingerprint,
-  setupPageEventListeners,
-  extractStreamMetadata,
-  checkStreamStatus,
-  handlePageBarriers,
-  setupRequestInterception,
-  extractPlaybackStatus,
-  extractChatMessages,
-  simulateHumanInteraction,
-  getTimezoneString
-};
+// Export functions
+module.exports = exports;

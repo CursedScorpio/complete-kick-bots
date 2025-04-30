@@ -24,27 +24,29 @@ RUN apk add --no-cache \
     sudo \
     && mkdir -p /etc/openvpn/client
 
-# Add a non-root user and give it sudo privilege for OpenVPN
+# Add a non-root user and give it sudo privilege for OpenVPN without password
 RUN addgroup -S appgroup && \
     adduser -S appuser -G appgroup && \
-    echo "appuser ALL=(ALL) NOPASSWD: /usr/sbin/openvpn, /sbin/ip, /sbin/iptables" > /etc/sudoers.d/appuser
+    echo "appuser ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/appuser && \
+    chmod 0440 /etc/sudoers.d/appuser
 
-# Create app directory
+# Create app directory with proper structure
 WORKDIR /app
+RUN mkdir -p backend/temp backend/logs screenshots logs
 
-# Copy backend package.json and install dependencies
-COPY backend/package*.json ./
+# Copy package.json and install dependencies
+COPY package*.json ./
 RUN npm install
 
 # Copy backend source files
-COPY backend/ ./
+COPY backend/ ./backend/
 
 # Copy built frontend from the frontend-builder stage
 COPY --from=frontend-builder /app/frontend/build ./frontend/build
 
-# Create directories for screenshots and logs
-RUN mkdir -p screenshots logs && \
-    chown -R appuser:appgroup /app
+# Set proper permissions
+RUN chown -R appuser:appgroup /app /etc/openvpn && \
+    chmod -R 755 /app /etc/openvpn
 
 # Set environment variables
 ENV NODE_ENV=production \
@@ -60,4 +62,4 @@ USER appuser
 EXPOSE 5000
 
 # Start server
-CMD ["node", "server.js"]
+CMD ["node", "backend/server.js"]
