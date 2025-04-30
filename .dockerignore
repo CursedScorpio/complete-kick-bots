@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.DS_Store
+.vscode
+screenshots
+logs
+data
+vpn
+*/node_modules
+*/.git
+*/build
+*/.env 
