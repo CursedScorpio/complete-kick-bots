@@ -176,24 +176,39 @@ exports.startBox = async (req, res) => {
           }
         }
         
+        // Create viewers sequentially to avoid parallel save issues
         for (let i = 0; i < config.viewer.instancesPerBox; i++) {
-          const viewer = new Viewer({
-            box: box._id,
-            name: `${box.name}-Viewer-${i+1}`,
-            status: 'idle',
-            // Assign streamUrl and streamer if available
-            streamUrl: box.streamUrl || null,
-            streamer: streamer || null,
-            // Only one viewer per box will parse chat
-            isParseChatEnabled: i === 0, // First viewer parses chat
-          });
-          
-          await puppeteerService.saveViewerWithLock(viewer);
-          viewers.push(viewer);
-          
-          // Add viewer to stream's active viewers if it exists
-          if (stream) {
-            stream.activeViewers.push(viewer._id);
+          try {
+            // Add a small delay between each viewer creation to prevent parallel saves
+            if (i > 0) {
+              await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            
+            const viewer = new Viewer({
+              box: box._id,
+              name: `${box.name}-Viewer-${i+1}`,
+              status: 'idle',
+              // Assign streamUrl and streamer if available
+              streamUrl: box.streamUrl || null,
+              streamer: streamer || null,
+              // Only one viewer per box will parse chat
+              isParseChatEnabled: i === 0, // First viewer parses chat
+            });
+            
+            // Use saveViewerWithLock to prevent parallel save issues
+            const savedViewer = await puppeteerService.saveViewerWithLock(viewer);
+            viewers.push(savedViewer);
+            
+            // Add viewer to stream's active viewers if it exists
+            if (stream) {
+              stream.activeViewers.push(savedViewer._id);
+            }
+            
+            // Let MongoDB process the save before moving to the next one
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } catch (error) {
+            logger.error(`Error creating viewer ${i+1} for box ${box.name}: ${error.message}`);
+            // Continue to next viewer
           }
         }
         
@@ -215,17 +230,35 @@ exports.startBox = async (req, res) => {
           for (let i = 0; i < viewers.length; i++) {
             const viewer = viewers[i];
             try {
-              // Add a delay between starting each viewer to prevent request flooding
-              await new Promise(resolve => setTimeout(resolve, i * 2000));
+              // Add a longer delay between starting each viewer to prevent request flooding
+              // and potential race conditions
+              await new Promise(resolve => setTimeout(resolve, i * 5000));
               
-              // Start viewer async
-              puppeteerService.startViewer(viewer._id)
-                .then(() => {
-                  logger.info(`Viewer ${viewer.name} auto-started successfully for stream: ${viewer.streamUrl}`);
-                })
-                .catch(async (error) => {
-                  logger.error(`Failed to auto-start viewer ${viewer.name}: ${error.message}`);
-                });
+              // Make sure the viewer document still exists before starting
+              const viewerExists = await Viewer.findById(viewer._id);
+              if (!viewerExists) {
+                logger.warn(`Viewer ${viewer.name} (${viewer._id}) no longer exists, skipping auto-start`);
+                continue;
+              }
+              
+              logger.info(`Attempting to auto-start viewer ${viewer.name} (${i+1}/${viewers.length})`);
+              
+              // Start viewer with promise
+              try {
+                await puppeteerService.startViewer(viewer._id);
+                logger.info(`Viewer ${viewer.name} auto-started successfully for stream: ${viewer.streamUrl}`);
+              } catch (error) {
+                logger.error(`Failed to auto-start viewer ${viewer.name}: ${error.message}`);
+                
+                // Update viewer with error
+                try {
+                  viewerExists.status = 'error';
+                  viewerExists.error = `Auto-start failed: ${error.message}`;
+                  await puppeteerService.saveViewerWithLock(viewerExists);
+                } catch (saveError) {
+                  logger.error(`Failed to update viewer ${viewer.name} after auto-start failure: ${saveError.message}`);
+                }
+              }
             } catch (error) {
               logger.error(`Error when trying to auto-start viewer ${viewer.name}: ${error.message}`);
             }

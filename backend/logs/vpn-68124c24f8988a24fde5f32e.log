@@ -41,3 +41,8 @@
 2025-04-30 18:13:27 net_iface_up: set tun_box_68124c2 up
 2025-04-30 18:13:27 net_addr_v4_add: 10.100.0.2/16 dev tun_box_68124c2
 2025-04-30 18:13:27 Initialization Sequence Completed
+2025-04-30 18:15:52 event_wait : Interrupted system call (code=4)
+2025-04-30 18:15:52 SIGTERM received, sending exit notification to peer
+2025-04-30 18:15:53 Closing TUN/TAP interface
+2025-04-30 18:15:53 net_addr_v4_del: 10.100.0.2 dev tun_box_68124c2
+2025-04-30 18:15:53 SIGTERM[soft,exit-with-notification] received, process exiting

@@ -41,3 +41,14 @@
 2025-04-30 18:08:36 net_iface_up: set tun_box_68124b0 up
 2025-04-30 18:08:36 net_addr_v4_add: 10.100.0.2/16 dev tun_box_68124b0
 2025-04-30 18:08:36 Initialization Sequence Completed
+2025-04-30 19:06:50 VERIFY OK: depth=2, C=PA, O=NordVPN, CN=NordVPN Root CA
+2025-04-30 19:06:50 VERIFY OK: depth=1, O=NordVPN, CN=NordVPN CA10
+2025-04-30 19:06:50 VERIFY KU OK
+2025-04-30 19:06:50 Validating certificate extended key usage
+2025-04-30 19:06:50 ++ Certificate has EKU (str) TLS Web Server Authentication, expects TLS Web Server Authentication
+2025-04-30 19:06:50 VERIFY EKU OK
+2025-04-30 19:06:50 VERIFY X509NAME OK: CN=de750.nordvpn.com
+2025-04-30 19:06:50 VERIFY OK: depth=0, CN=de750.nordvpn.com
+2025-04-30 19:06:50 Outgoing Data Channel: Cipher 'AES-256-GCM' initialized with 256 bit key
+2025-04-30 19:06:50 Incoming Data Channel: Cipher 'AES-256-GCM' initialized with 256 bit key
+2025-04-30 19:06:50 Control Channel: TLSv1.3, cipher TLSv1.3 TLS_AES_256_GCM_SHA384, peer certificate: 4096 bit RSA, signature: RSA-SHA512

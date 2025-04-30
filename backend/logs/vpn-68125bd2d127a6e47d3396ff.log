@@ -1,0 +1,26 @@
+2025-04-30 19:21:01 DEPRECATED OPTION: --cipher set to 'AES-256-CBC' but missing in --data-ciphers (AES-256-GCM:AES-128-GCM). Future OpenVPN version will ignore --cipher for cipher negotiations. Add 'AES-256-CBC' to --data-ciphers or change --cipher 'AES-256-CBC' to --data-ciphers-fallback 'AES-256-CBC' to silence this warning.
+2025-04-30 19:21:01 OpenVPN 2.5.11 x86_64-pc-linux-gnu [SSL (OpenSSL)] [LZO] [LZ4] [EPOLL] [PKCS11] [MH/PKTINFO] [AEAD] built on Sep 17 2024
+2025-04-30 19:21:01 library versions: OpenSSL 3.0.2 15 Mar 2022, LZO 2.10
+2025-04-30 19:21:01 WARNING: --ping should normally be used with --ping-restart or --ping-exit
+2025-04-30 19:21:01 Outgoing Control Channel Authentication: Using 512 bit message hash 'SHA512' for HMAC authentication
+2025-04-30 19:21:01 Incoming Control Channel Authentication: Using 512 bit message hash 'SHA512' for HMAC authentication
+2025-04-30 19:21:01 TCP/UDP: Preserving recently used remote address: [AF_INET]188.95.55.3:1194
+2025-04-30 19:21:01 Socket Buffers: R=[212992->212992] S=[212992->212992]
+2025-04-30 19:21:01 UDP link local: (not bound)
+2025-04-30 19:21:01 UDP link remote: [AF_INET]188.95.55.3:1194
+2025-04-30 19:21:01 TLS: Initial packet from [AF_INET]188.95.55.3:1194, sid=4e42f3c7 552ef334
+2025-04-30 19:21:01 WARNING: this configuration may cache passwords in memory -- use the auth-nocache option to prevent this
+2025-04-30 19:21:01 VERIFY OK: depth=2, C=PA, O=NordVPN, CN=NordVPN Root CA
+2025-04-30 19:21:01 VERIFY OK: depth=1, O=NordVPN, CN=NordVPN CA10
+2025-04-30 19:21:01 VERIFY KU OK
+2025-04-30 19:21:01 Validating certificate extended key usage
+2025-04-30 19:21:01 ++ Certificate has EKU (str) TLS Web Server Authentication, expects TLS Web Server Authentication
+2025-04-30 19:21:01 VERIFY EKU OK
+2025-04-30 19:21:01 VERIFY X509NAME OK: CN=be184.nordvpn.com
+2025-04-30 19:21:01 VERIFY OK: depth=0, CN=be184.nordvpn.com
+2025-04-30 19:21:01 Control Channel: TLSv1.3, cipher TLSv1.3 TLS_AES_256_GCM_SHA384, peer certificate: 4096 bit RSA, signature: RSA-SHA512
+2025-04-30 19:21:01 [be184.nordvpn.com] Peer Connection Initiated with [AF_INET]188.95.55.3:1194
+2025-04-30 19:21:02 SENT CONTROL [be184.nordvpn.com]: 'PUSH_REQUEST' (status=1)
+2025-04-30 19:21:07 SENT CONTROL [be184.nordvpn.com]: 'PUSH_REQUEST' (status=1)
+2025-04-30 19:21:07 AUTH: Received control message: AUTH_FAILED
+2025-04-30 19:21:07 SIGTERM[soft,auth-failure] received, process exiting

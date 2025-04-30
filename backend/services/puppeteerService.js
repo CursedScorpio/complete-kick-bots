@@ -66,11 +66,58 @@ async function saveViewerWithLock(viewer) {
   // Set the lock
   saveLocks.set(viewerId, lockPromise);
   
+  // Maximum retry attempts and initial delay
+  const maxRetries = 3;
+  const initialDelay = 100;
+  
   try {
-    // Perform the save
-    await viewer.save();
-    resolveLock();
-    return viewer;
+    let attempts = 0;
+    let lastError = null;
+    
+    // Retry logic with exponential backoff
+    while (attempts < maxRetries) {
+      try {
+        // Reload the document if this is a retry attempt
+        if (attempts > 0) {
+          const freshViewer = await Viewer.findById(viewerId);
+          if (!freshViewer) {
+            throw new Error(`Viewer ${viewerId} not found during retry`);
+          }
+          
+          // Copy only the changed fields to avoid conflicts
+          Object.keys(viewer._doc).forEach(key => {
+            if (key !== '_id' && key !== '__v' && !key.startsWith('$')) {
+              freshViewer[key] = viewer[key];
+            }
+          });
+          
+          // Use the fresh document for saving
+          viewer = freshViewer;
+        }
+        
+        // Perform the save
+        await viewer.save();
+        resolveLock();
+        return viewer;
+      } catch (error) {
+        lastError = error;
+        
+        // Check if this is a concurrent modification error
+        if (error.message && error.message.includes("parallel")) {
+          // Exponential backoff
+          const delay = initialDelay * Math.pow(2, attempts);
+          logger.warn(`Concurrent save detected for viewer ${viewerId}, retrying in ${delay}ms (attempt ${attempts + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          attempts++;
+        } else {
+          // Not a concurrent modification error, rethrow
+          throw error;
+        }
+      }
+    }
+    
+    // If we get here, we've exhausted our retries
+    throw lastError || new Error(`Failed to save viewer ${viewerId} after ${maxRetries} attempts`);
   } catch (error) {
     rejectLock(error);
     throw error;
@@ -809,6 +856,12 @@ async function setupKickRequestInterception(page) {
       return;
     }
     
+    // Block requests to cdndex.io that cause CORS errors
+    if (url.includes('cdndex.io')) {
+      request.abort();
+      return;
+    }
+    
     // Critical Kick.com resources that should always be allowed
     if (url.includes('kick.com') && (
         url.includes('stream') || 
@@ -922,6 +975,37 @@ async function handleKickPageBarriers(page) {
   try {
     // Wait for page to load enough to find common barriers
     await page.waitForTimeout(2000);
+    
+    // Block problematic scripts that cause CORS errors
+    await page.evaluateOnNewDocument(() => {
+      // Block scripts from problematic domains
+      const originalCreateElement = document.createElement;
+      document.createElement = function(tagName) {
+        const element = originalCreateElement.call(document, tagName);
+        
+        if (tagName.toLowerCase() === 'script') {
+          const originalSetAttribute = element.setAttribute;
+          element.setAttribute = function(name, value) {
+            if (name === 'src') {
+              const blockedDomains = [
+                'cdndex.io',
+                'reporting.cdndex',
+                'tracker.cdndex'
+              ];
+              
+              // Check if the source matches any blocked domain
+              if (blockedDomains.some(domain => value.includes(domain))) {
+                console.warn(`Blocking script from: ${value}`);
+                return;
+              }
+            }
+            return originalSetAttribute.call(this, name, value);
+          };
+        }
+        
+        return element;
+      };
+    });
     
     // Look for and handle cookie consent dialogs
     const cookieSelectors = [
