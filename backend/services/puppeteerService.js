@@ -32,9 +32,11 @@ if (!fs.existsSync(screenshotsDir)) {
   fs.mkdirSync(screenshotsDir, { recursive: true });
 }
 
-// Add near the top of the file, after the existing imports and constant declarations
 // Map to store save locks for viewers to prevent concurrent saves
 const saveLocks = new Map();
+
+// Track failed attempts to retry with different fingerprints
+const failedAttempts = new Map();
 
 /**
  * Save a viewer with locking to prevent parallel saves
@@ -128,232 +130,112 @@ function getTimezoneString(offset) {
 }
 
 /**
- * Generate a sophisticated browser fingerprint
+ * Generate mobile-focused fingerprint for better Kick.com compatibility
  * @returns {Object} - Browser fingerprint object
  */
-function generateAdvancedFingerprint() {
-  // Use the existing fingerprint generator but enhance it
+function generateMobileFingerprint() {
+  // Start with the base fingerprint
   const baseFingerprint = fingerprint.generateRandomFingerprint(config.viewer.fingerprintOptions);
   
-  // OS and browser distributions - more realistic combinations
-  const osFamilies = {
-    "Windows": ["Windows 10", "Windows 11"],
-    "macOS": ["macOS 10.15", "macOS 11", "macOS 12", "macOS 13"],
-    "Linux": ["Ubuntu 20.04", "Ubuntu 22.04", "Fedora 37"],
-    "Android": ["Android 12", "Android 13"],
-    "iOS": ["iOS 16", "iOS 17"]
-  };
-  
-  const browserVersions = {
-    "Chrome": ["110.0.5481.177", "111.0.5563.64", "112.0.5615.49", "113.0.5672.93", "114.0.5735.106"],
-    "Firefox": ["109.0", "110.0", "111.0", "112.0", "113.0"],
-    "Safari": ["15.6.1", "16.0", "16.1", "16.2", "16.3"],
-    "Edge": ["110.0.1587.50", "111.0.1661.44", "112.0.1722.34", "113.0.1774.35"]
-  };
-  
-  // Select a random OS family and version
-  const osFamily = Object.keys(osFamilies)[Math.floor(Math.random() * Object.keys(osFamilies).length)];
-  const osVersion = osFamilies[osFamily][Math.floor(Math.random() * osFamilies[osFamily].length)];
-  
-  // Select appropriate browser for the OS
-  let browserName;
-  if (osFamily === "iOS") {
-    browserName = "Safari";
-  } else if (osFamily === "Android") {
-    browserName = Math.random() > 0.3 ? "Chrome" : "Samsung Internet";
-  } else {
-    // Desktop OS - distribute browsers realistically
-    const rand = Math.random();
-    if (rand < 0.65) {
-      browserName = "Chrome";
-    } else if (rand < 0.85) {
-      browserName = "Firefox";
-    } else if (rand < 0.95) {
-      browserName = "Edge";
-    } else {
-      browserName = osFamily === "macOS" ? "Safari" : "Opera";
+  // Mobile OS distributions - focused on ones that work well with Kick
+  const mobilePlatforms = [
+    {
+      osFamily: "Android",
+      osVersion: "13",
+      browserName: "Chrome",
+      browserVersions: ["110.0.5481.177", "111.0.5563.64", "112.0.5615.49", "113.0.5672.93", "114.0.5735.106"],
+      screenResolutions: [
+        {width: 412, height: 915}, // Pixel 6
+        {width: 360, height: 800}, // Samsung Galaxy
+        {width: 414, height: 896}, // iPhone XR/11 (but we're using Android)
+        {width: 393, height: 873}, // Pixel 5
+        {width: 412, height: 892}  // OnePlus 9
+      ]
+    },
+    {
+      osFamily: "iOS",
+      osVersion: "16.5",
+      browserName: "Safari",
+      browserVersions: ["16.0", "16.1", "16.3", "16.5"],
+      screenResolutions: [
+        {width: 390, height: 844}, // iPhone 13/14
+        {width: 428, height: 926}, // iPhone 13/14 Pro Max
+        {width: 414, height: 896}, // iPhone 11
+        {width: 375, height: 812}  // iPhone X/XS
+      ]
     }
+  ];
+  
+  // Choose a random mobile platform (80% Android, 20% iOS since Android works better)
+  const platformChoice = Math.random() < 0.8 ? 0 : 1;
+  const platform = mobilePlatforms[platformChoice];
+  
+  // Select browser version and screen resolution
+  const browserVersion = platform.browserVersions[Math.floor(Math.random() * platform.browserVersions.length)];
+  const screenResolution = platform.screenResolutions[Math.floor(Math.random() * platform.screenResolutions.length)];
+  
+  // Sometimes flip to landscape which works better for viewing
+  const isLandscape = Math.random() < 0.6; // 60% chance for landscape
+  if (isLandscape) {
+    const temp = screenResolution.width;
+    screenResolution.width = screenResolution.height;
+    screenResolution.height = temp;
   }
   
-  // Get appropriate browser version
-  const browserVersion = browserVersions[browserName] ? 
-    browserVersions[browserName][Math.floor(Math.random() * browserVersions[browserName].length)] :
-    "100.0";
-  
-  // Generate realistic screen resolutions based on device type
-  let screenResolution;
-  if (osFamily === "iOS" || osFamily === "Android") {
-    // Mobile resolutions
-    const mobileResolutions = [
-      {width: 414, height: 896},  // iPhone XR/11
-      {width: 390, height: 844},  // iPhone 12/13/14
-      {width: 428, height: 926},  // iPhone 13/14 Pro Max
-      {width: 360, height: 800},  // Samsung Galaxy
-      {width: 412, height: 915},  // Pixel 6
-      {width: 360, height: 780}   // Common Android
-    ];
-    screenResolution = mobileResolutions[Math.floor(Math.random() * mobileResolutions.length)];
-    // Sometimes flip to landscape
-    if (Math.random() < 0.3) {
-      const temp = screenResolution.width;
-      screenResolution.width = screenResolution.height;
-      screenResolution.height = temp;
-    }
-  } else {
-    // Desktop resolutions
-    const desktopResolutions = [
-      {width: 1920, height: 1080},  // Full HD
-      {width: 1366, height: 768},   // Common laptop
-      {width: 1440, height: 900},   // MacBook
-      {width: 2560, height: 1440},  // 2K
-      {width: 1280, height: 800},   // Small laptop
-      {width: 3840, height: 2160}   // 4K
-    ];
-    screenResolution = desktopResolutions[Math.floor(Math.random() * desktopResolutions.length)];
-  }
-  
-  // Generate User-Agent based on selected platform
+  // Generate appropriate User-Agent
   let userAgent;
-  // For accurate user agents, we'd use a comprehensive library or service
-  // Here we'll rely on randomUseragent but filter by the chosen browser and OS
-  const browserFilter = new RegExp(browserName, 'i');
-  const osFilter = new RegExp(osFamily, 'i');
-  
-  for (let i = 0; i < 10; i++) {
-    const candidate = randomUseragent.getRandom();
-    if (browserFilter.test(candidate) && osFilter.test(candidate)) {
-      userAgent = candidate;
-      break;
-    }
+  if (platform.osFamily === "Android") {
+    userAgent = `Mozilla/5.0 (Linux; Android ${platform.osVersion}; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browserVersion} Mobile Safari/537.36`;
+  } else {
+    userAgent = `Mozilla/5.0 (iPhone; CPU iPhone OS ${platform.osVersion.replace('.', '_')} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${browserVersion} Mobile/15E148 Safari/604.1`;
   }
   
-  // If no matching user agent found, create a generic one based on the chosen browser and OS
-  if (!userAgent) {
-    if (browserName === "Chrome") {
-      userAgent = `Mozilla/5.0 (${osFamily === "Windows" ? "Windows NT 10.0; Win64; x64" : 
-        osFamily === "macOS" ? "Macintosh; Intel Mac OS X 10_15_7" : 
-        osFamily === "Linux" ? "X11; Linux x86_64" : 
-        osFamily === "Android" ? "Android 13; Mobile" : 
-        "iPhone; CPU iPhone OS 16_0 like Mac OS X"}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browserVersion} Safari/537.36`;
-    } else if (browserName === "Firefox") {
-      userAgent = `Mozilla/5.0 (${osFamily === "Windows" ? "Windows NT 10.0; Win64; x64" : 
-        osFamily === "macOS" ? "Macintosh; Intel Mac OS X 10.15" : 
-        osFamily === "Linux" ? "X11; Linux x86_64" : 
-        osFamily === "Android" ? "Android 13; Mobile" : 
-        "iPhone; CPU iPhone OS 16_0 like Mac OS X"}; rv:109.0) Gecko/20100101 Firefox/${browserVersion}`;
-    } else {
-      userAgent = randomUseragent.getRandom();
-    }
-  }
-  
-  // Create enhanced fingerprint
-  const enhancedFingerprint = {
+  // Create enhanced fingerprint with mobile focus
+  const mobileFingerprint = {
     ...baseFingerprint,
     userAgent,
-    osFamily,
-    osVersion,
-    browserName,
-    browserVersion,
+    osFamily: platform.osFamily,
+    osVersion: platform.osVersion,
+    browserName: platform.browserName,
+    browserVersion: browserVersion,
     screenResolution,
     colorDepth: 24,
-    deviceMemory: [2, 4, 8, 16][Math.floor(Math.random() * 4)],
-    hardwareConcurrency: [2, 4, 6, 8, 12, 16][Math.floor(Math.random() * 6)],
-    platform: osFamily === "Windows" ? "Win32" : 
-              osFamily === "macOS" ? "MacIntel" : 
-              osFamily === "Linux" ? "Linux x86_64" : 
-              osFamily === "Android" ? "Android" : "iPhone",
-    language: ["en-US", "en-GB", "fr-FR", "de-DE", "es-ES", "it-IT", "ja-JP", "ko-KR", "pt-BR", "ru-RU", "zh-CN"]
-      [Math.floor(Math.random() * 11)],
-    doNotTrack: Math.random() > 0.7 ? "1" : null,
-    cookieEnabled: Math.random() > 0.05,
+    deviceMemory: [2, 3, 4, 6][Math.floor(Math.random() * 4)], // Mobile devices typically have less memory
+    hardwareConcurrency: [4, 6, 8][Math.floor(Math.random() * 3)], // Mobile devices typically have fewer cores
+    platform: platform.osFamily === "Android" ? "Android" : "iPhone",
+    language: ["en-US", "en-GB", "fr-FR", "de-DE", "es-ES", "it-IT", "ja-JP", "ko-KR", "pt-BR"][Math.floor(Math.random() * 9)],
+    doNotTrack: Math.random() > 0.9 ? "1" : null, // Most mobile browsers don't have DNT enabled
+    cookieEnabled: true, // Mobile browsers almost always have cookies enabled
     timezone: Math.floor(Math.random() * 25) - 12, // -12 to +12
     timezoneString: "",
-    plugins: generateRandomPlugins(browserName, osFamily),
-    touchSupported: osFamily === "Android" || osFamily === "iOS" || Math.random() < 0.1,
-    maxTouchPoints: osFamily === "Android" || osFamily === "iOS" ? [1, 2, 5][Math.floor(Math.random() * 3)] : 0,
+    plugins: [], // Mobile browsers typically don't expose plugins
+    touchSupported: true,
+    maxTouchPoints: platform.osFamily === "iOS" ? 5 : [1, 2, 5][Math.floor(Math.random() * 3)],
     webdriver: false,
     webgl: {
-      vendor: osFamily === "macOS" ? "Apple" : "Google Inc. (NVIDIA)",
-      renderer: osFamily === "macOS" ? "Apple GPU" : "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0)"
+      vendor: platform.osFamily === "iOS" ? "Apple GPU" : "Google SwiftShader",
+      renderer: platform.osFamily === "iOS" ? "Apple GPU" : "Google SwiftShader"
     },
-    hasTouch: osFamily === "Android" || osFamily === "iOS",
-    isMobile: osFamily === "Android" || osFamily === "iOS"
+    hasTouch: true,
+    isMobile: true,
+    isAndroid: platform.osFamily === "Android",
+    isIOS: platform.osFamily === "iOS",
+    isLandscape: isLandscape
   };
   
   // Set timezone string based on timezone offset
-  enhancedFingerprint.timezoneString = getTimezoneString(enhancedFingerprint.timezone);
+  mobileFingerprint.timezoneString = getTimezoneString(mobileFingerprint.timezone);
   
-  return enhancedFingerprint;
+  return mobileFingerprint;
 }
 
 /**
- * Generate random browser plugins based on browser and OS
- * @param {string} browserName - Name of the browser
- * @param {string} osFamily - Name of the OS family
- * @returns {Array} - Array of plugin objects
- */
-function generateRandomPlugins(browserName, osFamily) {
-  const plugins = [];
-  
-  // Common plugins
-  const commonPlugins = [
-    { name: "PDF Viewer", description: "Portable Document Format", filename: "internal-pdf-viewer" },
-    { name: "Chrome PDF Viewer", description: "Portable Document Format", filename: "chrome-pdf-viewer" },
-    { name: "Chromium PDF Viewer", description: "Portable Document Format", filename: "chromium-pdf-viewer" },
-    { name: "Microsoft Edge PDF Viewer", description: "Portable Document Format", filename: "edge-pdf-viewer" },
-    { name: "WebKit built-in PDF", description: "Portable Document Format", filename: "webkit-pdf-viewer" },
-    { name: "Native Client", description: "Native Client", filename: "internal-nacl-plugin" }
-  ];
-  
-  // Browser-specific plugins
-  if (browserName === "Chrome" || browserName === "Edge") {
-    // Chrome plugins
-    plugins.push(commonPlugins[0], commonPlugins[1], commonPlugins[5]);
-    if (Math.random() > 0.5) {
-      plugins.push({ 
-        name: "Chrome Remote Desktop Viewer", 
-        description: "This plugin allows you to securely access other computers or allow another user to access your computer securely.", 
-        filename: "internal-remoting-viewer" 
-      });
-    }
-  } else if (browserName === "Firefox") {
-    // Firefox plugins
-    plugins.push(commonPlugins[0]);
-    if (Math.random() > 0.7 && osFamily !== "iOS" && osFamily !== "Android") {
-      plugins.push({ 
-        name: "Widevine Content Decryption Module", 
-        description: "Enables Widevine licenses for playback of HTML audio/video content.", 
-        filename: "widevine-cdm" 
-      });
-    }
-  } else if (browserName === "Safari") {
-    // Safari plugins (typically very few)
-    plugins.push(commonPlugins[4]);
-  }
-  
-  // Add random popular extensions with low probability
-  if (Math.random() > 0.85 && browserName !== "Safari") {
-    const popularExtensions = [
-      { name: "AdBlock", description: "Blocks ads on websites", filename: "adblock.dll" },
-      { name: "uBlock Origin", description: "An efficient blocker", filename: "ublock.dll" },
-      { name: "Grammarly", description: "Enhance your writing", filename: "grammarly.dll" },
-      { name: "Honey", description: "Automatic coupon finder", filename: "honey.dll" },
-      { name: "LastPass", description: "Password manager", filename: "lastpass.dll" }
-    ];
-    
-    plugins.push(popularExtensions[Math.floor(Math.random() * popularExtensions.length)]);
-  }
-  
-  return plugins;
-}
-
-/**
- * Apply comprehensive fingerprinting to a page
+ * Apply comprehensive fingerprinting to a page with mobile focus
  * @param {Object} page - Puppeteer page object
  * @param {Object} fingerprint - Fingerprint configuration
  */
-async function applyAdvancedFingerprinting(page, fingerprint) {
-  // Set extra HTTP headers for language and accept headers
+async function applyMobileFingerprinting(page, fingerprint) {
+  // Set extra HTTP headers - but REMOVE upgrade-insecure-requests which causes CORS issues
   await page.setExtraHTTPHeaders({
     'Accept-Language': fingerprint.language,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
@@ -362,17 +244,16 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-User': '?1',
     'Sec-Fetch-Dest': 'document',
-    // Removed 'Cache-Control' header as it causes CORS issues
-    'Upgrade-Insecure-Requests': '1',
+    // Removed 'Upgrade-Insecure-Requests' header as it causes CORS issues
     'sec-ch-ua': `"${fingerprint.browserName}";v="${fingerprint.browserVersion}", "Not_A Brand";v="99"`,
-    'sec-ch-ua-mobile': fingerprint.isMobile ? '?1' : '?0',
+    'sec-ch-ua-mobile': '?1', // Always set to mobile
     'sec-ch-ua-platform': `"${fingerprint.osFamily}"`
   });
   
   // Emulate timezone
   await page.emulateTimezone(fingerprint.timezoneString);
   
-  // Advanced fingerprint evasion using evaluateOnNewDocument
+  // Advanced fingerprint evasion
   await page.evaluateOnNewDocument((fp) => {
     // Override navigator properties
     const originalNavigator = window.navigator;
@@ -401,6 +282,16 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
             return false;
           case 'maxTouchPoints':
             return fp.maxTouchPoints;
+          // Mobile specific properties
+          case 'userAgentData':
+            return {
+              brands: [
+                { brand: fp.browserName, version: fp.browserVersion.split('.')[0] },
+                { brand: 'Not.A.Brand', version: '24' }
+              ],
+              mobile: true,
+              platform: fp.osFamily
+            };
           default:
             // Call the native navigator for methods and other properties
             const value = target[property];
@@ -416,7 +307,7 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
       configurable: false
     });
     
-    // Override screen properties
+    // Override screen properties for mobile
     const screenProxy = new Proxy(window.screen, {
       get: function(target, property) {
         switch (property) {
@@ -427,11 +318,16 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
           case 'availWidth':
             return fp.screenResolution.width;
           case 'availHeight':
-            return fp.screenResolution.height - 40; // Account for OS taskbars
+            return fp.screenResolution.height - (fp.isIOS ? 40 : 48); // iOS vs Android status bar
           case 'colorDepth':
             return fp.colorDepth;
           case 'pixelDepth':
             return fp.colorDepth;
+          case 'orientation':
+            return {
+              type: fp.isLandscape ? 'landscape-primary' : 'portrait-primary',
+              angle: fp.isLandscape ? 90 : 0
+            };
           default:
             const value = target[property];
             return typeof value === 'function' ? value.bind(target) : value;
@@ -445,34 +341,60 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
       configurable: false
     });
     
-    // Override plugins - create a more realistic plugins array
-    if (fp.browserName !== 'Safari') {
-      const pluginArray = fp.plugins.map(plugin => {
-        return {
-          name: plugin.name,
-          description: plugin.description,
-          filename: plugin.filename,
-          length: 1,
-          item: () => null,
-          namedItem: () => null
-        };
-      });
-      
-      // Add methods to the array
-      pluginArray.refresh = () => {};
-      pluginArray.item = (index) => pluginArray[index] || null;
-      pluginArray.namedItem = (name) => {
-        for (const plugin of pluginArray) {
-          if (plugin.name === name) return plugin;
+    // Mobile specific - override matchMedia for orientation
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = function(query) {
+      if (query.includes('orientation')) {
+        const isPortraitQuery = query.includes('portrait');
+        const isLandscapeQuery = query.includes('landscape');
+        
+        if ((isPortraitQuery && !fp.isLandscape) || (isLandscapeQuery && fp.isLandscape)) {
+          return {
+            matches: true,
+            media: query,
+            onchange: null,
+            addListener: function() {},
+            removeListener: function() {},
+            addEventListener: function() {},
+            removeEventListener: function() {},
+            dispatchEvent: function() { return true; }
+          };
+        } else {
+          return {
+            matches: false,
+            media: query,
+            onchange: null,
+            addListener: function() {},
+            removeListener: function() {},
+            addEventListener: function() {},
+            removeEventListener: function() {},
+            dispatchEvent: function() { return true; }
+          };
         }
-        return null;
-      };
+      }
       
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => pluginArray,
-        enumerable: true,
-        configurable: false
-      });
+      // For other queries, use the original implementation
+      return originalMatchMedia.call(window, query);
+    };
+    
+    // Mobile specific - add touch events
+    if (typeof TouchEvent !== 'undefined') {
+      // Don't override if the browser already supports touch events
+    } else {
+      // Simple mock for touch events if not available
+      window.TouchEvent = function TouchEvent(type, options) {
+        return new Event(type, options);
+      };
+      window.Touch = function Touch(options) {
+        this.identifier = options.identifier || 0;
+        this.target = options.target || null;
+        this.clientX = options.clientX || 0;
+        this.clientY = options.clientY || 0;
+        this.screenX = options.screenX || 0;
+        this.screenY = options.screenY || 0;
+        this.pageX = options.pageX || 0;
+        this.pageY = options.pageY || 0;
+      };
     }
     
     // Modify Date behavior for consistent timezone emulation
@@ -493,71 +415,7 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
     
     window.Date = dateProxy;
     
-    // Mock Chrome-specific features if browser is Chrome or Edge
-    if (fp.browserName === 'Chrome' || fp.browserName === 'Edge') {
-      window.chrome = {
-        app: {
-          InstallState: {
-            DISABLED: 'disabled',
-            INSTALLED: 'installed',
-            NOT_INSTALLED: 'not_installed'
-          },
-          RunningState: {
-            CANNOT_RUN: 'cannot_run',
-            READY_TO_RUN: 'ready_to_run',
-            RUNNING: 'running'
-          },
-          getDetails: () => ({}),
-          getIsInstalled: () => false,
-          installState: () => 'not_installed',
-          isInstalled: false,
-          runningState: () => 'cannot_run'
-        },
-        runtime: {
-          OnInstalledReason: {
-            CHROME_UPDATE: 'chrome_update',
-            INSTALL: 'install',
-            SHARED_MODULE_UPDATE: 'shared_module_update',
-            UPDATE: 'update'
-          },
-          OnRestartRequiredReason: {
-            APP_UPDATE: 'app_update',
-            OS_UPDATE: 'os_update',
-            PERIODIC: 'periodic'
-          },
-          PlatformArch: {
-            ARM: 'arm',
-            ARM64: 'arm64',
-            MIPS: 'mips',
-            MIPS64: 'mips64',
-            X86_32: 'x86-32',
-            X86_64: 'x86-64'
-          },
-          PlatformNaclArch: {
-            ARM: 'arm',
-            MIPS: 'mips',
-            MIPS64: 'mips64',
-            X86_32: 'x86-32',
-            X86_64: 'x86-64'
-          },
-          PlatformOs: {
-            ANDROID: 'android',
-            CROS: 'cros',
-            LINUX: 'linux',
-            MAC: 'mac',
-            OPENBSD: 'openbsd',
-            WIN: 'win'
-          },
-          RequestUpdateCheckStatus: {
-            NO_UPDATE: 'no_update',
-            THROTTLED: 'throttled',
-            UPDATE_AVAILABLE: 'update_available'
-          }
-        }
-      };
-    }
-    
-    // Override WebGL to return consistent values
+    // WebGL rendering for mobile
     if (window.WebGLRenderingContext) {
       const getParameter = WebGLRenderingContext.prototype.getParameter;
       WebGLRenderingContext.prototype.getParameter = function(parameter) {
@@ -573,67 +431,31 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
       };
     }
     
-    // Create consistent canvas fingerprint
-    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
-      // For fingerprinting canvases, add slight random noise
-      const canvas = this;
-      if (canvas.width > 16 && canvas.height > 16) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          // Add subtle noise to prevent fingerprinting
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imageData.data;
-          for (let i = 0; i < data.length; i += 4) {
-            // Skip areas that are likely text (detect by checking for anti-aliasing patterns)
-            const isLikelyText = data[i+3] > 0 && data[i+3] < 255;
-            if (!isLikelyText) {
-              data[i] = data[i] + Math.floor(Math.random() * 3) - 1;     // Red
-              data[i+1] = data[i+1] + Math.floor(Math.random() * 3) - 1; // Green
-              data[i+2] = data[i+2] + Math.floor(Math.random() * 3) - 1; // Blue
-            }
-          }
-          ctx.putImageData(imageData, 0, 0);
-        }
-      }
-      return originalToDataURL.call(this, type, quality);
-    };
+    // Mobile specific - override devicePixelRatio
+    Object.defineProperty(window, 'devicePixelRatio', {
+      get: function() {
+        // Mobile devices typically have higher pixel ratios
+        return fp.isIOS ? 3 : 2.75;
+      },
+      configurable: true
+    });
     
-    // Override audio context for audio fingerprinting prevention
-    if (window.AudioContext || window.webkitAudioContext) {
-      const OriginalAudioContext = window.AudioContext || window.webkitAudioContext;
-      const OriginalOscillator = window.OscillatorNode;
-      const OriginalAnalyser = window.AnalyserNode;
-      const OriginalGain = window.GainNode;
-      
-      // Override createOscillator
-      if (OriginalOscillator && OriginalOscillator.prototype) {
-        const originalCreateOscillator = OriginalAudioContext.prototype.createOscillator;
-        OriginalAudioContext.prototype.createOscillator = function() {
-          const oscillator = originalCreateOscillator.call(this);
-          oscillator.start = function(when = 0) {
-            // Add random tiny delay to frustrate timing attacks
-            const randomDelay = Math.random() * 0.01;
-            this._start(when + randomDelay);
-          };
-          Object.defineProperty(oscillator, '_start', { value: oscillator.start });
-          return oscillator;
-        };
-      }
-      
-      // Override getFloatFrequencyData to add noise
-      if (OriginalAnalyser && OriginalAnalyser.prototype) {
-        const originalGetFloatFrequencyData = OriginalAnalyser.prototype.getFloatFrequencyData;
-        OriginalAnalyser.prototype.getFloatFrequencyData = function(array) {
-          originalGetFloatFrequencyData.call(this, array);
-          // Add subtle noise to the frequency data
-          for (let i = 0; i < array.length; i++) {
-            array[i] += Math.random() * 0.1 - 0.05;
-          }
-          return array;
-        };
-      }
-    }
+    // Mobile specific - override ontouchstart
+    Object.defineProperty(window, 'ontouchstart', {
+      get: function() {
+        return null;
+      },
+      set: function() {},
+      configurable: true
+    });
+    
+    // Add event-related overrides for mobile
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+      // For touch events like touchstart, touchmove, touchend
+      // We let them pass through normally for mobile emulation
+      return originalAddEventListener.call(this, type, listener, options);
+    };
     
     // Override performance API to prevent timing attacks
     if (window.performance && window.performance.now) {
@@ -645,194 +467,347 @@ async function applyAdvancedFingerprinting(page, fingerprint) {
       };
     }
     
-    // Override battery API to provide consistent values
+    // Override battery API to provide consistent values for mobile
     if (navigator.getBattery) {
       navigator.getBattery = function() {
         return Promise.resolve({
-          charging: Math.random() > 0.3,
+          charging: Math.random() > 0.5, // Mobile devices are often plugged in
           chargingTime: Math.random() > 0.5 ? Infinity : Math.floor(Math.random() * 7200),
-          dischargingTime: Math.random() > 0.5 ? Infinity : Math.floor(Math.random() * 14400),
-          level: 0.25 + Math.random() * 0.75,
+          dischargingTime: Math.floor(Math.random() * 14400) + 3600, // More realistic for mobile
+          level: 0.3 + Math.random() * 0.6, // 30-90% is typical
           addEventListener: function() {},
           removeEventListener: function() {}
         });
       };
     }
     
-    // Prevent iframe detection
-    if (window.parent !== window) {
-      window.parent = window;
-    }
-    
-    // Prevent webdriver detection
-    if ('webdriver' in navigator) {
-      delete Object.getPrototypeOf(navigator).webdriver;
-    }
-    
-    // Mask Automation-related features
-    // Override permissions API
-    if (navigator.permissions) {
-      const originalQuery = navigator.permissions.query;
-      navigator.permissions.query = function(parameters) {
-        if (parameters.name === 'notifications') {
-          return Promise.resolve({
-            state: Notification.permission,
-            addEventListener: function() {},
-            removeEventListener: function() {},
-            dispatchEvent: function() { return true; }
-          });
-        }
-        return originalQuery.apply(this, arguments);
-      };
-    }
-    
-    // Override language detection
-    Object.defineProperty(navigator, 'language', { 
-      get: () => fp.language 
-    });
-    
-    Object.defineProperty(navigator, 'languages', { 
-      get: () => [fp.language, fp.language.split('-')[0]] 
-    });
-    
-    // Override connection API
+    // Mobile specific - Connection API
     if (navigator.connection) {
       Object.defineProperty(navigator, 'connection', {
         get: function() {
           return {
             effectiveType: ['4g', '3g'][Math.floor(Math.random() * 2)],
             rtt: Math.floor(Math.random() * 100) + 50,
-            downlink: Math.floor(Math.random() * 15) + 5,
-            saveData: Math.random() > 0.9
+            downlink: Math.floor(Math.random() * 10) + 2,
+            saveData: false // Most mobile users don't enable data saving
           };
+        }
+      });
+    } else {
+      // Add connection API if not present (some browsers)
+      Object.defineProperty(navigator, 'connection', {
+        value: {
+          effectiveType: '4g',
+          rtt: 50,
+          downlink: 10,
+          saveData: false
         }
       });
     }
     
-    // Override media devices
+    // Mobile specific - add mediaDevices with overrides
     if (navigator.mediaDevices) {
       const originalEnumerateDevices = navigator.mediaDevices.enumerateDevices;
       navigator.mediaDevices.enumerateDevices = function() {
-        return originalEnumerateDevices.apply(this, arguments)
-          .then(devices => {
-            // Filter out detailed device information
-            return devices.map(device => {
-              const templateDevice = {
-                deviceId: device.deviceId,
-                kind: device.kind,
-                label: '',
-                groupId: ''
-              };
-              
-              // If permission is granted, use real labels but simplify them
-              if (device.label) {
-                if (device.kind === 'audioinput') {
-                  templateDevice.label = 'Default Microphone';
-                } else if (device.kind === 'audiooutput') {
-                  templateDevice.label = 'Default Speaker';
-                } else if (device.kind === 'videoinput') {
-                  templateDevice.label = 'Default Camera';
-                }
-              }
-              
-              return templateDevice;
-            });
-          });
+        return Promise.resolve([
+          {
+            deviceId: 'default',
+            kind: 'videoinput',
+            label: 'Front Camera',
+            groupId: 'camera-group'
+          },
+          {
+            deviceId: 'rear',
+            kind: 'videoinput',
+            label: 'Back Camera',
+            groupId: 'camera-group'
+          },
+          {
+            deviceId: 'default',
+            kind: 'audioinput',
+            label: 'Microphone',
+            groupId: 'audio-group'
+          },
+          {
+            deviceId: 'default',
+            kind: 'audiooutput',
+            label: 'Speaker',
+            groupId: 'audio-group'
+          }
+        ]);
       };
+    }
+    
+    // Create consistent canvas fingerprint (important for Kick.com)
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
+      // For fingerprinting canvases, add slight random noise
+      const canvas = this;
+      if (canvas.width > 16 && canvas.height > 16) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // Add subtle noise to prevent fingerprinting
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            // Skip text areas to maintain readability
+            const alpha = data[i+3];
+            if (alpha !== 0 && alpha !== 255) continue;
+              
+            data[i] = data[i] + Math.floor(Math.random() * 3) - 1;     // Red
+            data[i+1] = data[i+1] + Math.floor(Math.random() * 3) - 1; // Green
+            data[i+2] = data[i+2] + Math.floor(Math.random() * 3) - 1; // Blue
+          }
+          ctx.putImageData(imageData, 0, 0);
+        }
+      }
+      return originalToDataURL.call(this, type, quality);
+    };
+    
+    // Special handling for websockets for Kick.com
+    if (window.WebSocket) {
+      const OriginalWebSocket = window.WebSocket;
+      window.WebSocket = function(url, protocols) {
+        // Special handling for Kick.com websockets
+        if (url.includes('kick.com')) {
+          console.log('Connecting to Kick websocket:', url);
+          // We just pass it through, our request interceptor will handle headers
+        }
+        return new OriginalWebSocket(url, protocols);
+      };
+      window.WebSocket.prototype = OriginalWebSocket.prototype;
+      window.WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
+      window.WebSocket.OPEN = OriginalWebSocket.OPEN;
+      window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
+      window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
+    }
+    
+    // NoScript/Content-Security
+    Object.defineProperty(document, 'currentScript', {
+      get() {
+        return null;
+      }
+    });
+    
+    // Special handling for Fetch API - mobile specific headers
+    const originalFetch = window.fetch;
+    window.fetch = function(input, init) {
+      if (init && init.headers) {
+        // Process the headers
+        const modifiedInit = { ...init };
+        
+        // If using Headers object, convert to plain object
+        if (modifiedInit.headers instanceof Headers) {
+          const plainHeaders = {};
+          for (const [key, value] of modifiedInit.headers.entries()) {
+            plainHeaders[key] = value;
+          }
+          modifiedInit.headers = plainHeaders;
+        }
+        
+        // Convert to object if it's an array
+        if (Array.isArray(modifiedInit.headers)) {
+          const plainHeaders = {};
+          for (const [key, value] of modifiedInit.headers) {
+            plainHeaders[key] = value;
+          }
+          modifiedInit.headers = plainHeaders;
+        }
+        
+        // Remove problematic headers for CORS
+        if (typeof modifiedInit.headers === 'object') {
+          delete modifiedInit.headers['upgrade-insecure-requests'];
+          
+          // Add common mobile headers if not present
+          if (!modifiedInit.headers['sec-ch-ua-mobile']) {
+            modifiedInit.headers['sec-ch-ua-mobile'] = '?1';
+          }
+          
+          // Convert back to Headers object
+          const headers = new Headers();
+          for (const [key, value] of Object.entries(modifiedInit.headers)) {
+            headers.append(key, value);
+          }
+          modifiedInit.headers = headers;
+        }
+        
+        return originalFetch.call(window, input, modifiedInit);
+      }
+      
+      return originalFetch.call(window, input, init);
+    };
+    
+    // XMLHttpRequest header manipulation (for Kick.com)
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    const originalXHRSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+    
+    XMLHttpRequest.prototype.open = function(method, url) {
+      this._url = url;
+      return originalXHROpen.apply(this, arguments);
+    };
+    
+    XMLHttpRequest.prototype.setRequestHeader = function(header, value) {
+      // Skip problematic headers for Kick.com
+      if (header.toLowerCase() === 'upgrade-insecure-requests') {
+        return;
+      }
+      return originalXHRSetRequestHeader.call(this, header, value);
+    };
+    
+    // Special handling for HLS.js that Kick.com uses
+    if (window.Hls && window.Hls.DefaultConfig) {
+      window.Hls.DefaultConfig.xhrSetup = function(xhr, url) {
+        // Set any required headers here for HLS.js requests
+        // But don't add upgrade-insecure-requests
+      };
+    }
+    
+    // Set default media session
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Live Stream',
+        artist: 'Kick.com',
+        album: 'Live Stream',
+        artwork: []
+      });
     }
   }, fingerprint);
   
-  // Add additional page configuration
+  // Add mobile-specific gestures and behaviors
   await page.evaluateOnNewDocument(() => {
-    // Function to override native methods with custom ones that preserve functionality
-    function overrideNativeMethods() {
-      // Override toString methods to prevent detection
-      const nativeToString = Function.prototype.toString;
-      Function.prototype.toString = function() {
-        // Return native code string for built-in functions
-        if (this === Function.prototype.toString) {
-          return 'function toString() { [native code] }';
-        }
-        if (this === navigator.getBattery) {
-          return 'function getBattery() { [native code] }';
-        }
-        if (/^class /.test(nativeToString.call(this))) {
-          return nativeToString.call(this);
-        }
-        
-        // Otherwise, return the original function string
-        return nativeToString.call(this);
-      };
+    // Helper to create synthetic touch events
+    function createTouchEvent(element, eventType) {
+      if (!element) return;
       
-      // Override JavaScript getters
-      const objectDefinePropertyOriginal = Object.defineProperty;
-      Object.defineProperty = function(obj, prop, descriptor) {
-        // If descriptor has get or set, make them look like native code
-        if (descriptor && (descriptor.get || descriptor.set)) {
-          if (descriptor.get) {
-            const originalGet = descriptor.get;
-            descriptor.get = function() {
-              return originalGet.call(this);
-            };
-            Object.defineProperty(descriptor.get, 'toString', {
-              value: function() {
-                return 'function get ' + prop + '() { [native code] }';
-              }
-            });
-          }
-          if (descriptor.set) {
-            const originalSet = descriptor.set;
-            descriptor.set = function(val) {
-              return originalSet.call(this, val);
-            };
-            Object.defineProperty(descriptor.set, 'toString', {
-              value: function() {
-                return 'function set ' + prop + '() { [native code] }';
-              }
-            });
-          }
-        }
-        return objectDefinePropertyOriginal.call(this, obj, prop, descriptor);
-      };
+      // Create touch points
+      const rect = element.getBoundingClientRect();
+      const touch = new Touch({
+        identifier: Date.now(),
+        target: element,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        screenX: rect.left + rect.width / 2,
+        screenY: rect.top + rect.height / 2,
+        pageX: rect.left + rect.width / 2 + window.scrollX,
+        pageY: rect.top + rect.height / 2 + window.scrollY
+      });
+      
+      // Create touch event
+      const touchEvent = new TouchEvent(eventType, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        touches: eventType === 'touchend' ? [] : [touch],
+        targetTouches: eventType === 'touchend' ? [] : [touch],
+        changedTouches: [touch]
+      });
+      
+      // Dispatch event
+      element.dispatchEvent(touchEvent);
     }
     
-    // Function to clean the stack trace to avoid detection
-    function cleanStackTraces() {
-      const originalPrepareStackTrace = Error.prepareStackTrace;
-      Error.prepareStackTrace = function(error, structuredStackTrace) {
-        return structuredStackTrace.map(frame => {
-          // Hide Puppeteer-related filenames
-          if (frame.getFileName() && frame.getFileName().includes('puppeteer')) {
-            const cleanedFrame = Object.create(frame);
-            Object.defineProperty(cleanedFrame, 'getFileName', {
-              value: function() {
-                return 'https://example.com/script.js';
-              }
+    // Add to window for use in other contexts
+    window.createTouchEvent = createTouchEvent;
+    
+    // Override HTMLVideoElement for better mobile compatibility
+    if (window.HTMLVideoElement) {
+      const originalPlay = HTMLVideoElement.prototype.play;
+      HTMLVideoElement.prototype.play = function() {
+        // Check if it's a Kick.com video player
+        if (this.id === 'video-player' || 
+            this.parentElement?.classList.contains('player-no-controls') ||
+            this.closest('[class*="player"]')) {
+          console.log("Enhanced mobile video play initiated");
+          
+          // Make sure autoplay attributes are set
+          this.autoplay = true;
+          this.muted = false;
+          this.playsInline = true;
+          
+          // Create video settings that work well on mobile
+          this.volume = 0.5;
+          this.controls = true;
+          
+          // Add event listener to handle stalled/freeze issues
+          this.addEventListener('stalled', function() {
+            console.log("Video stalled, attempting recovery");
+            const currentTime = this.currentTime;
+            this.load();
+            this.currentTime = currentTime;
+            originalPlay.call(this).catch(e => console.error("Recovery play failed:", e));
+          }, { once: true });
+          
+          // Mobile devices often need an initial touch to allow video playback
+          createTouchEvent(this, 'touchstart');
+          createTouchEvent(this, 'touchend');
+        }
+        
+        return originalPlay.call(this).catch(error => {
+          console.error("Video play error:", error);
+          
+          // If autoplay was blocked, try with muted first, then unmute
+          if (error.name === 'NotAllowedError') {
+            console.log("Attempting muted playback first");
+            this.muted = true;
+            return originalPlay.call(this).then(() => {
+              // Successfully started muted, now try to unmute
+              setTimeout(() => {
+                console.log("Attempting to unmute");
+                this.muted = false;
+              }, 1000);
+            }).catch(e => {
+              console.error("Muted play also failed:", e);
+              return Promise.reject(e);
             });
-            return cleanedFrame;
           }
-          return frame;
+          
+          return Promise.reject(error);
         });
       };
     }
-    
-    // Execute all modifications
-    overrideNativeMethods();
-    // Using cleanStackTraces() can be buggy, uncomment if needed
-    // cleanStackTraces();
   });
 }
 
 /**
- * Configure browser to intercept and handle requests
+ * Configure browser to intercept and handle requests for Kick.com
  * @param {Object} page - Puppeteer page object
  */
-async function setupRequestInterception(page) {
+async function setupKickRequestInterception(page) {
   await page.setRequestInterception(true);
   
   page.on('request', (request) => {
     const url = request.url().toLowerCase();
     const resourceType = request.resourceType();
+    
+    // Fix for websocket token issue - detected in logs
+    if (url.includes('websockets.kick.com/viewer/v1/token')) {
+      // Modify the request to handle CORS issues
+      const newHeaders = {
+        ...request.headers(),
+        'Origin': 'https://kick.com',
+        'Referer': 'https://kick.com/',
+      };
+      
+      // Remove problematic headers
+      delete newHeaders['upgrade-insecure-requests'];
+      
+      // Continue with modified headers
+      request.continue({ headers: newHeaders });
+      return;
+    }
+    
+    // Datadoghq CORS issue fix - detected in logs
+    if (url.includes('datadoghq.com')) {
+      // Remove problematic headers
+      const newHeaders = {
+        ...request.headers()
+      };
+      
+      delete newHeaders['upgrade-insecure-requests'];
+      
+      request.continue({ headers: newHeaders });
+      return;
+    }
     
     // Critical Kick.com resources that should always be allowed
     if (url.includes('kick.com') && (
@@ -851,13 +826,15 @@ async function setupRequestInterception(page) {
         url.includes('assets') ||
         url.includes('hls') ||
         url.includes('m3u8') ||
-        url.includes('.ts')
+        url.includes('.ts') ||
+        url.includes('.js') ||  // Allow all JavaScript files - needed for player
+        url.includes('.css')    // Allow all CSS files - needed for player
       )) {
       request.continue();
       return;
     }
     
-    // Allow through connections to Kick websockets and Datadog - needed for proper stream functionality
+    // Allow through connections to Kick websockets and essential CDNs
     if (url.includes('websocket') || 
         url.includes('wss://') || 
         url.includes('ws://') || 
@@ -865,7 +842,8 @@ async function setupRequestInterception(page) {
         url.includes('video.kick.com') ||
         url.includes('datadoghq.com') ||
         url.includes('akamaihd.net') ||
-        url.includes('cloudfront.net')) {
+        url.includes('cloudfront.net') ||
+        url.includes('fastly.net')) {
       request.continue();
       return;
     }
@@ -875,7 +853,8 @@ async function setupRequestInterception(page) {
         resourceType === 'media' || 
         resourceType === 'xhr' || 
         resourceType === 'fetch' ||
-        (resourceType === 'script' && url.includes('kick.com'))) {
+        resourceType === 'script' ||
+        resourceType === 'stylesheet') {
       request.continue();
       return;
     }
@@ -892,10 +871,8 @@ async function setupRequestInterception(page) {
       url.includes('segment.io') ||
       url.includes('mixpanel') ||
       url.includes('fingerprint') ||
-      url.includes('fingerprintjs') ||
       url.includes('clarity.ms') ||
       url.includes('recaptcha') ||
-      url.includes('datadome') ||
       url.includes('perimeterx') ||
       url.includes('cloudflare-insights') ||
       url.includes('omtrdc.net') ||
@@ -921,13 +898,27 @@ async function setupRequestInterception(page) {
       request.continue();
     }
   });
+  
+  // Listen for response errors to detect blocked resources
+  page.on('response', async (response) => {
+    const url = response.url().toLowerCase();
+    const status = response.status();
+    
+    // Focus on detecting 403 Forbidden responses (bot detection)
+    if (status === 403 && url.includes('kick.com')) {
+      // Log details for key resources
+      if (url.includes('stream') || url.includes('player') || url.includes('.js')) {
+        logger.warn(`403 Forbidden response for critical resource: ${url}`);
+      }
+    }
+  });
 }
 
 /**
- * Handle common page barriers (cookie consent, ad overlays, etc)
+ * Handle common page barriers on Kick.com
  * @param {Object} page - Puppeteer page object
  */
-async function handlePageBarriers(page) {
+async function handleKickPageBarriers(page) {
   try {
     // Wait for page to load enough to find common barriers
     await page.waitForTimeout(2000);
@@ -1002,55 +993,122 @@ async function handlePageBarriers(page) {
       }
     }
     
-    // Try to ensure video autoplay
+    // Try to ensure video autoplay using both click and programmatic play
     try {
-      // First try direct play on video element
+      // Kick-specific mobile video handling - using touch events
       await page.evaluate(() => {
-        const videos = document.querySelectorAll('video, #video-player');
-        for (const video of videos) {
-          if (video.paused) {
-            video.play().catch(() => {});
+        try {
+          // Find Kick video player
+          const kickPlayer = document.querySelector('#video-player');
+          if (kickPlayer) {
+            console.log("Found Kick video player, applying mobile optimizations");
+            
+            // Apply mobile optimizations
+            kickPlayer.muted = false;
+            kickPlayer.volume = 0.5;
+            kickPlayer.controls = true;
+            kickPlayer.playsInline = true;
+            kickPlayer.autoplay = true;
+            
+            // Use touch events (important for mobile)
+            if (window.createTouchEvent) {
+              window.createTouchEvent(kickPlayer, 'touchstart');
+              window.createTouchEvent(kickPlayer, 'touchend');
+            }
+            
+            // Force play
+            kickPlayer.play().catch(e => console.warn("Initial play failed:", e));
+            
+            // Continue to check and ensure playback
+            setTimeout(() => {
+              if (kickPlayer.paused) {
+                console.log("Player still paused, trying again");
+                kickPlayer.play().catch(e => console.warn("Retry play failed:", e));
+              }
+            }, 2000);
+            
+            return true;
+          } else {
+            console.log("Kick video player not found, trying generic video element");
+            const video = document.querySelector('video');
+            if (video) {
+              // Apply same optimizations to generic video
+              video.muted = false;
+              video.volume = 0.5;
+              video.controls = true;
+              video.playsInline = true;
+              video.autoplay = true;
+              
+              if (window.createTouchEvent) {
+                window.createTouchEvent(video, 'touchstart');
+                window.createTouchEvent(video, 'touchend');
+              }
+              
+              video.play().catch(e => console.warn("Generic play failed:", e));
+              return true;
+            }
           }
           
-          // Make sure it's not muted
-          if (video.muted) {
-            video.muted = false;
-          }
-          
-          // Set volume to 50%
-          video.volume = 0.5;
+          return false;
+        } catch (e) {
+          console.error("Error in video autoplay handling:", e);
+          return false;
         }
       });
       
-      // Then try clicking play buttons
+      // Also try clicking play buttons
       const playButtonSelectors = [
-        'button[class*="play"]',
-        'button[aria-label="Play"]',
-        'div[class*="play-button"]',
-        '.ytp-play-button',
-        '.vjs-play-control'
+        '.play-button',
+        '.vjs-big-play-button',
+        '.player-control-playpause',
+        '.player__play-button',
+        '[aria-label="Play"]',
+        'button.play',
+        // Additional selectors specific to Kick
+        '.control-icon-container', 
+        '.vjs-play-control',
+        '.video-react-play-control'
       ];
       
       for (const selector of playButtonSelectors) {
-        const playButtons = await page.$$(selector);
-        if (playButtons.length > 0) {
-          for (const button of playButtons) {
-            try {
-              await button.click();
-              await page.waitForTimeout(1000);
+        try {
+          const playButtons = await page.$$(selector);
+          if (playButtons.length > 0) {
+            logger.info(`Found play button with selector: ${selector}`);
+            
+            // Use touchscreen gesture for mobile emulation
+            const buttonPosition = await page.evaluate(el => {
+              const rect = el.getBoundingClientRect();
+              return {
+                x: rect.x + rect.width / 2,
+                y: rect.y + rect.height / 2
+              };
+            }, playButtons[0]);
+            
+            // Execute touch events
+            await page.touchscreen.tap(buttonPosition.x, buttonPosition.y);
+            await page.waitForTimeout(500);
+            
+            // Check if video started playing
+            const isPlaying = await page.evaluate(() => {
+              const video = document.querySelector('#video-player') || document.querySelector('video');
+              return video && !video.paused;
+            });
+            
+            if (isPlaying) {
+              logger.info(`Successfully started playback with ${selector}`);
               break;
-            } catch (e) {
-              // Try next button if one fails
-              continue;
             }
           }
+        } catch (error) {
+          logger.debug(`Failed with play button selector ${selector}: ${error.message}`);
         }
       }
     } catch (error) {
-      logger.debug(`Failed to auto-play video: ${error.message}`);
+      logger.debug(`Failed to ensure video autoplay: ${error.message}`);
     }
   } catch (error) {
-    logger.warn(`Error handling page barriers: ${error.message}`);
+    logger.warn(`Error handling Kick page barriers: ${error.message}`);
     // Don't throw so the process can continue
   }
 }
@@ -1060,83 +1118,82 @@ async function handlePageBarriers(page) {
  * @param {Object} page - Puppeteer page object
  * @returns {boolean} - Whether the stream is live
  */
-async function checkStreamStatus(page) {
+async function checkKickStreamStatus(page) {
   try {
-    // This implementation is specialized for Kick.com
-    
-    // Check for the Kick.com video player
-    const hasVideo = await page.evaluate(() => {
-      // Check for video element with ID 'video-player' (Kick.com specific)
-      const kickPlayer = document.querySelector('#video-player');
-      if (kickPlayer && !kickPlayer.paused && kickPlayer.readyState > 2) {
-        return true;
-      }
-      
-      // Backup checks for other video players
-      const videos = document.querySelectorAll('video');
-      for (const video of videos) {
-        if (!video.paused && video.readyState > 2) {
-          return true;
-        }
-      }
-      
-      return !!document.querySelector('iframe[src*="player"]') ||
-             !!document.querySelector('.stream-player') ||
-             !!document.querySelector('.video-js');
-    });
-    
-    // Check if there's a "Live" indicator specific to Kick.com
-    const hasLiveIndicator = await page.evaluate(() => {
-      // Look for Kick.com specific live indicators
-      const liveElements = document.querySelectorAll('.live-indicator, .stream-status--live, .status-live');
-      if (liveElements.length > 0) {
-        return true;
-      }
-      
-      // Fallback to generic live indicators
-      const allElements = Array.from(document.querySelectorAll('*')).filter(el => {
-        const text = el.innerText && el.innerText.trim().toUpperCase();
-        const classes = el.className && typeof el.className === 'string' ? el.className : '';
-        const dataAttrs = el.getAttribute('data-status') || el.getAttribute('data-state') || '';
+    // Kick.com specific checks
+    return await page.evaluate(() => {
+      try {
+        // Check for the Kick video player and its state
+        const kickPlayer = document.querySelector('#video-player');
+        let isVideoPlaying = false;
         
-        return (text === 'LIVE') || 
-               classes.includes('live') || 
-               dataAttrs === 'live';
-      });
-      
-      return allElements.length > 0;
-    });
-    
-    // Check for Kick.com specific offline indicators
-    const hasOfflineMessage = await page.evaluate(() => {
-      // Look for specific offline indicators for Kick.com
-      const offlineElements = document.querySelectorAll('.offline-indicator, .stream-status--offline, .status-offline');
-      if (offlineElements.length > 0) {
-        return true;
+        if (kickPlayer) {
+          isVideoPlaying = !kickPlayer.paused && 
+                           !kickPlayer.ended && 
+                           kickPlayer.readyState > 2 &&
+                           kickPlayer.currentTime > 0;
+          
+          // If we have a playing video, it's likely live
+          if (isVideoPlaying) return true;
+        }
+        
+        // Fallback to generic video elements
+        const videos = document.querySelectorAll('video');
+        for (const video of videos) {
+          if (!video.paused && video.readyState > 2 && video.currentTime > 0) {
+            isVideoPlaying = true;
+            break;
+          }
+        }
+        
+        // Look for explicit "Live" indicators
+        const liveIndicators = document.querySelectorAll(
+          '.live-indicator, .stream-status--live, .status-live, ' +
+          '[class*="live-indicator"], [class*="live-badge"], ' +
+          '[data-status="live"], [class*="livestatus-live"]'
+        );
+        
+        const hasLiveIndicator = liveIndicators.length > 0;
+        
+        // Look for explicit offline indicators
+        const offlineIndicators = document.querySelectorAll(
+          '.offline-indicator, .stream-status--offline, .status-offline, ' +
+          '[class*="offline-indicator"], [data-status="offline"]'
+        );
+        
+        const hasOfflineIndicator = offlineIndicators.length > 0;
+        
+        // Also check for text content indicating status
+        const pageText = document.body.innerText.toLowerCase();
+        const hasOfflineText = [
+          'offline', 'not live', 'stream ended', 'no longer live',
+          'was live', 'currently offline', 'this channel is not live'
+        ].some(text => pageText.includes(text));
+        
+        // Decision logic
+        if (isVideoPlaying) {
+          // Video is playing, most reliable indicator
+          return true;
+        } else if (hasLiveIndicator && !hasOfflineIndicator) {
+          // Live indicator present and no offline indicator
+          return true;
+        } else if (hasOfflineIndicator) {
+          // Explicit offline indicator
+          return false;
+        } else if (hasOfflineText) {
+          // Text suggests offline
+          return false;
+        }
+        
+        // Default - if video is loaded at all, consider it potentially live
+        const videoElements = document.querySelectorAll('#video-player, video');
+        return videoElements.length > 0;
+      } catch (e) {
+        console.error("Error checking stream status:", e);
+        // If there's an error, fallback to checking for video element
+        return !!document.querySelector('#video-player') || !!document.querySelector('video');
       }
-      
-      // Fallback to checking page text
-      const text = document.body.innerText.toLowerCase();
-      
-      // Check for common offline indicators
-      const offlineIndicators = [
-        'offline',
-        'not live', 
-        'stream ended',
-        'no longer live',
-        'was live',
-        'currently offline',
-        'this channel is not live'
-      ];
-      
-      return offlineIndicators.some(indicator => text.includes(indicator));
     });
-    
-    // Debug logging
-    logger.debug(`Kick stream status check: hasVideo=${hasVideo}, hasLiveIndicator=${hasLiveIndicator}, hasOfflineMessage=${hasOfflineMessage}`);
-    
-    // For Kick streams, prioritize the live indicator if video is detected
-    return hasVideo && (hasLiveIndicator || !hasOfflineMessage);
   } catch (error) {
     logger.error(`Failed to check Kick stream status: ${error.message}`);
     return false; // Assume not live on error
@@ -1144,11 +1201,11 @@ async function checkStreamStatus(page) {
 }
 
 /**
- * Extract stream information for Kick.com (title, streamer, viewers)
+ * Extract stream information for Kick.com
  * @param {Object} page - Puppeteer page object
  * @returns {Object} - Stream metadata
  */
-async function extractStreamMetadata(page) {
+async function extractKickMetadata(page) {
   try {
     return await page.evaluate(() => {
       const metadata = {};
@@ -1175,27 +1232,6 @@ async function extractStreamMetadata(page) {
           }
         }
         
-        // Fallback to generic title selectors
-        if (!metadata.title) {
-          const genericTitleSelectors = [
-            'h1[class*="title"]',
-            'div[class*="title"]',
-            'span[title]',
-            'title'
-          ];
-          
-          for (const selector of genericTitleSelectors) {
-            const element = document.querySelector(selector);
-            if (element) {
-              metadata.title = element.innerText || element.textContent || element.getAttribute('title') || '';
-              if (metadata.title) {
-                metadata.title = metadata.title.trim();
-                break;
-              }
-            }
-          }
-        }
-        
         // Kick.com specific streamer name selectors
         const streamerSelectors = [
           '.channel-info-bar__username',
@@ -1217,27 +1253,6 @@ async function extractStreamMetadata(page) {
           }
         }
         
-        // Fallback to generic streamer selectors
-        if (!metadata.streamerName) {
-          const genericStreamerSelectors = [
-            'a[href*="/channel/"]',
-            'h1[class*="channel"]',
-            'div[class*="username"]',
-            'div[class*="channel"] h2'
-          ];
-          
-          for (const selector of genericStreamerSelectors) {
-            const element = document.querySelector(selector);
-            if (element) {
-              metadata.streamerName = element.innerText || element.textContent || '';
-              if (metadata.streamerName) {
-                metadata.streamerName = metadata.streamerName.trim();
-                break;
-              }
-            }
-          }
-        }
-        
         // Kick.com specific category/game selectors
         const gameSelectors = [
           '.category-name',
@@ -1254,27 +1269,6 @@ async function extractStreamMetadata(page) {
             if (metadata.game) {
               metadata.game = metadata.game.trim();
               break;
-            }
-          }
-        }
-        
-        // Fallback to generic game selectors
-        if (!metadata.game) {
-          const genericGameSelectors = [
-            'a[href*="/game/"]',
-            'a[href*="/category/"]',
-            '.stream-game-name',
-            '.stream__game'
-          ];
-          
-          for (const selector of genericGameSelectors) {
-            const element = document.querySelector(selector);
-            if (element) {
-              metadata.game = element.innerText || element.textContent || '';
-              if (metadata.game) {
-                metadata.game = metadata.game.trim();
-                break;
-              }
             }
           }
         }
@@ -1308,62 +1302,41 @@ async function extractStreamMetadata(page) {
           }
         }
         
-        // If no specific selector worked, try a broader approach
-        if (!metadata.viewers) {
-          const allElements = document.querySelectorAll('*');
-          for (const el of allElements) {
-            if (!el || !el.innerText) continue;
-            const text = el.innerText.trim();
-            const match = text.match(/(\d[\d,\.]+)\s*(viewer|watching|view|spectator)/i);
-            if (match) {
-              metadata.viewers = parseInt(match[1].replace(/[,\.]/g, ''));
-              break;
-            }
-          }
-        }
-        
         // Check if the stream is actually live
-        const liveIndicators = document.querySelectorAll('.live, .isLive, .live-indicator, .stream-status--live, [data-a-target="live-indicator"]');
+        const liveIndicators = document.querySelectorAll(
+          '.live, .isLive, .live-indicator, .stream-status--live, [data-a-target="live-indicator"]'
+        );
         metadata.isLive = liveIndicators.length > 0;
         
-        // Duration of stream if available
-        const durationSelectors = [
-          '.stream-duration',
-          '.stream-uptime',
-          '.live-time',
-          '.uptime-indicator',
-          '.stream-info-card__time'
-        ];
-        
-        for (const selector of durationSelectors) {
-          const element = document.querySelector(selector);
-          if (element) {
-            metadata.duration = element.innerText || element.textContent || '';
-            if (metadata.duration) {
-              metadata.duration = metadata.duration.trim();
-              break;
-            }
-          }
+        // Video element status (most reliable)
+        const video = document.querySelector('#video-player') || document.querySelector('video');
+        if (video) {
+          metadata.videoPresent = true;
+          metadata.videoPlaying = !video.paused && video.readyState > 2;
+          metadata.videoDuration = video.duration || 0;
+          metadata.videoCurrentTime = video.currentTime || 0;
+        } else {
+          metadata.videoPresent = false;
         }
         
         return metadata;
       } catch (error) {
         console.error('Error extracting metadata:', error);
-        return {};
+        return { error: error.message };
       }
     });
   } catch (error) {
     logger.error(`Failed to extract stream metadata: ${error.message}`);
-    return {};
+    return { error: error.message };
   }
 }
 
 /**
- * Extract stream playback status (playing, buffering, etc)
+ * Extract stream playback status specific to Kick.com
  * @param {Object} page - Puppeteer page object
  * @returns {Object} - Playback status information
  */
-async function extractPlaybackStatus(page) {
+async function extractKickPlaybackStatus(page) {
   try {
     return await page.evaluate(() => {
       const status = {
@@ -1385,6 +1358,16 @@ async function extractPlaybackStatus(page) {
           status.isBuffering = kickVideo.readyState < 3;
           status.isMuted = kickVideo.muted;
           status.volume = Math.round(kickVideo.volume * 100);
+          status.currentTime = kickVideo.currentTime;
+          status.readyState = kickVideo.readyState;
+          status.networkState = kickVideo.networkState;
+          
+          // Additional mobile-specific info
+          status.hasDimensions = kickVideo.videoWidth > 0 && kickVideo.videoHeight > 0;
+          status.src = kickVideo.src || null;
+          status.srcType = kickVideo.src ? 
+                         (kickVideo.src.startsWith('blob:') ? 'blob' : 'direct') : 
+                         null;
         } else {
           // Fallback to generic video element
           const video = document.querySelector('video');
@@ -1394,6 +1377,8 @@ async function extractPlaybackStatus(page) {
             status.isBuffering = video.readyState < 3;
             status.isMuted = video.muted;
             status.volume = Math.round(video.volume * 100);
+          } else {
+            status.error = "No video player found";
           }
         }
         
@@ -1434,6 +1419,23 @@ async function extractPlaybackStatus(page) {
           }
         }
         
+        // Check for loading spinner (indicates buffering)
+        const spinnerSelectors = [
+          '.loading-spinner', 
+          '.spinner', 
+          '.vjs-loading-spinner',
+          '[class*="loading"]',
+          '[class*="buffering"]'
+        ];
+        
+        for (const selector of spinnerSelectors) {
+          const spinner = document.querySelector(selector);
+          if (spinner && window.getComputedStyle(spinner).display !== 'none') {
+            status.isBuffering = true;
+            break;
+          }
+        }
+        
         return status;
       } catch (error) {
         console.error('Error extracting playback status:', error);
@@ -1441,7 +1443,7 @@ async function extractPlaybackStatus(page) {
       }
     });
   } catch (error) {
-    logger.error(`Failed to extract playback status: ${error.message}`);
+    logger.error(`Failed to extract Kick playback status: ${error.message}`);
     return { isPlaying: false, error: error.message };
   }
 }
@@ -1451,7 +1453,7 @@ async function extractPlaybackStatus(page) {
  * @param {Object} page - Puppeteer page object
  * @returns {Array} - Chat messages
  */
-async function extractChatMessages(page) {
+async function extractKickChatMessages(page) {
   try {
     return await page.evaluate(() => {
       const chatMessages = [];
@@ -1472,22 +1474,6 @@ async function extractChatMessages(page) {
           if (chatContainer) break;
         }
         
-        // Fallback to generic chat containers
-        if (!chatContainer) {
-          const genericContainers = [
-            '.chat-window__messages',
-            '.chat-scrollable-area__message-container',
-            '.stream-chat',
-            '.vjs-comment-list',
-            '#chat-room-header-label'
-          ];
-          
-          for (const selector of genericContainers) {
-            chatContainer = document.querySelector(selector);
-            if (chatContainer) break;
-          }
-        }
-        
         if (!chatContainer) return chatMessages;
         
         // Kick.com specific message selectors
@@ -1505,20 +1491,6 @@ async function extractChatMessages(page) {
           if (messageElements.length > 0) break;
         }
         
-        // Fallback to generic message selectors
-        if (messageElements.length === 0) {
-          const genericMessageSelectors = [
-            '.chat-line',
-            '.chat-line__message',
-            '.message'
-          ];
-          
-          for (const selector of genericMessageSelectors) {
-            messageElements = chatContainer.querySelectorAll(selector);
-            if (messageElements.length > 0) break;
-          }
-        }
-        
         // Process the last 50 messages (or fewer if not that many)
         const start = Math.max(0, messageElements.length - 50);
         
@@ -1530,12 +1502,6 @@ async function extractChatMessages(page) {
           const usernameEl = messageEl.querySelector('.chat-message-sender, .chat-entry__username, .chat-author, .username-container');
           if (usernameEl) {
             username = usernameEl.innerText || usernameEl.textContent || '';
-          } else {
-            // Fallback to generic username selectors
-            const genericUsernameEl = messageEl.querySelector('.chat-author__display-name, .chat-line__username, .username');
-            if (genericUsernameEl) {
-              username = genericUsernameEl.innerText || genericUsernameEl.textContent || '';
-            }
           }
           
           // Extract message text - Kick.com specific
@@ -1543,22 +1509,6 @@ async function extractChatMessages(page) {
           const textEl = messageEl.querySelector('.chat-message-content, .chat-entry__message, .message-content');
           if (textEl) {
             messageText = textEl.innerText || textEl.textContent || '';
-          } else {
-            // Fallback to generic text selectors
-            const genericTextEl = messageEl.querySelector('.chat-line__message-body, .message-body, .chat-message__message, .text-fragment');
-            if (genericTextEl) {
-              messageText = genericTextEl.innerText || genericTextEl.textContent || '';
-            } else {
-              // If no specific text element found, try to extract text after username
-              const fullText = messageEl.innerText || messageEl.textContent || '';
-              if (username && fullText.includes(username)) {
-                messageText = fullText.substring(fullText.indexOf(username) + username.length).trim();
-                // Remove colons and other common separators
-                messageText = messageText.replace(/^[:\->\s]+/, '').trim();
-              } else {
-                messageText = fullText;
-              }
-            }
           }
           
           // Skip empty messages
@@ -1630,13 +1580,13 @@ async function extractChatMessages(page) {
       }
     });
   } catch (error) {
-    logger.error(`Failed to extract chat messages: ${error.message}`);
+    logger.error(`Failed to extract Kick chat messages: ${error.message}`);
     return [];
   }
 }
 
 /**
- * Start a viewer
+ * Start a viewer specifically optimized for Kick.com
  * @param {string} viewerId - ID of the viewer
  * @returns {Promise<boolean>} - Success status
  */
@@ -1655,10 +1605,17 @@ exports.startViewer = async (viewerId) => {
     throw new Error('No stream URL assigned');
   }
   
-  logger.info(`Starting viewer ${viewer.name} for stream ${viewer.streamUrl}`);
+  if (!viewer.streamUrl.includes('kick.com')) {
+    throw new Error('This viewer is optimized for Kick.com streams only');
+  }
   
-  // Generate an advanced fingerprint for this viewer
-  const browserFingerprint = generateAdvancedFingerprint();
+  logger.info(`Starting Kick.com viewer ${viewer.name} for stream ${viewer.streamUrl}`);
+  
+  // Check if we've had failed attempts with this viewer before
+  const attempts = failedAttempts.get(viewerId) || 0;
+  
+  // Generate a mobile fingerprint for better Kick.com compatibility
+  const browserFingerprint = generateMobileFingerprint();
   
   // Update viewer with the fingerprint
   viewer.browserFingerprint = browserFingerprint;
@@ -1666,7 +1623,7 @@ exports.startViewer = async (viewerId) => {
   await saveViewerWithLock(viewer);
   
   try {
-    // Enhanced launch options
+    // Enhanced launch options specifically for Kick.com
     const launchOptions = {
       headless: config.puppeteer.headless,
       executablePath: '/usr/bin/chromium-browser',
@@ -1675,11 +1632,27 @@ exports.startViewer = async (viewerId) => {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
+        // Mobile features for better compatibility
+        '--enable-features=NetworkService,NetworkServiceInProcess',
+        '--disable-features=IsolateOrigins,site-per-process',
+        // Allow WebGL and similar features that Kick.com needs
+        '--ignore-gpu-blocklist',
+        '--enable-gpu-rasterization',
+        '--enable-zero-copy',
+        // Set mobile viewport
         `--window-size=${browserFingerprint.screenResolution.width},${browserFingerprint.screenResolution.height}`,
+        // Mobile emulation essentials
+        '--touch-events=enabled',
+        '--enable-touch-drag-drop',
+        '--enable-touchpad-smooth-scrolling',
+        // Media playback features
+        '--autoplay-policy=no-user-gesture-required',
+        '--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies',
+        // Don't block media
+        '--allow-running-insecure-content',
+        '--autoplay-policy=user-gesture-required',
+        // Other essential configs
         '--disable-extensions',
-        '--disable-component-extensions-with-background-pages',
-        '--disable-default-apps',
         '--mute-audio',
         '--no-default-browser-check',
         '--no-first-run',
@@ -1690,24 +1663,41 @@ exports.startViewer = async (viewerId) => {
         '--disable-backgrounding-occluded-windows',
         '--disable-ipc-flooding-protection',
         '--disable-site-isolation-trials',
-        '--disable-features=IsolateOrigins,site-per-process',
         '--disable-blink-features=AutomationControlled',
         '--ignore-certificate-errors',
-        `--user-agent=${browserFingerprint.userAgent}`,
-        '--autoplay-policy=no-user-gesture-required', // Important for auto-playing video
-        '--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies' // Help with autoplay
+        // Enable improved media handling for mobile
+        '--enable-features=HandwritingRecognition,OverlayScrollbar,OverscrollHistoryNavigation',
+        `--user-agent=${browserFingerprint.userAgent}`
       ],
       ignoreHTTPSErrors: true,
       defaultViewport: {
         width: browserFingerprint.screenResolution.width,
         height: browserFingerprint.screenResolution.height,
-        deviceScaleFactor: 1,
-        hasTouch: browserFingerprint.hasTouch,
-        isLandscape: true,
-        isMobile: browserFingerprint.isMobile
+        deviceScaleFactor: browserFingerprint.isIOS ? 3 : 2.75,
+        hasTouch: true,
+        isLandscape: browserFingerprint.isLandscape,
+        isMobile: true
       },
       timeout: 60000 // 60 second timeout for browser launch
     };
+    
+    // Kick.com specific: Add mobile emulation if needed
+    if (attempts > 0) {
+      // After a failure, try different device emulation
+      const mobileDevices = [
+        'Pixel 5',
+        'Pixel 4',
+        'iPhone X',
+        'iPhone 11',
+        'Samsung Galaxy S20'
+      ];
+      
+      const deviceToEmulate = mobileDevices[attempts % mobileDevices.length];
+      logger.info(`Retry attempt ${attempts}: Using device emulation for ${deviceToEmulate}`);
+      
+      // Add device emulation
+      launchOptions.args.push(`--user-agent=${browserFingerprint.userAgent}`);
+    }
     
     // Launch a new browser instance
     const browser = await puppeteer.launch(launchOptions);
@@ -1715,11 +1705,11 @@ exports.startViewer = async (viewerId) => {
     // Create a new page
     const page = await browser.newPage();
     
-    // Apply advanced fingerprinting to make the browser appear more human-like
-    await applyAdvancedFingerprinting(page, browserFingerprint);
+    // Apply mobile fingerprinting for Kick.com
+    await applyMobileFingerprinting(page, browserFingerprint);
     
-    // Set up request interception to allow essential Kick.com resources and block tracking
-    await setupRequestInterception(page);
+    // Set up request interception specially tuned for Kick.com
+    await setupKickRequestInterception(page);
     
     // Add error handling for unexpected browser disconnection
     browser.on('disconnected', async () => {
@@ -1758,7 +1748,28 @@ exports.startViewer = async (viewerId) => {
     });
     
     // Add page event listeners for logging
-    await setupPageEventListeners(page, viewer);
+    page.on('console', async (msg) => {
+      const logLevel = msg.type() === 'error' ? 'error' : 
+                      msg.type() === 'warning' ? 'warn' : 'debug';
+      
+      // Log all console messages during debugging
+      logger[logLevel](`Console ${msg.type()} (${viewer.name}): ${msg.text()}`);
+      
+      // Add critical errors to viewer logs
+      if (logLevel === 'error' || (logLevel === 'warn' && msg.text().includes('WebGPU'))) {
+        viewer.logs.push({
+          level: logLevel,
+          message: `Console ${msg.type()}: ${msg.text()}`,
+        });
+        
+        // If too many logs, remove oldest
+        if (viewer.logs.length > 100) {
+          viewer.logs = viewer.logs.slice(-100);
+        }
+        
+        await saveViewerWithLock(viewer);
+      }
+    });
     
     // Store the browser and page instances
     browserInstances.set(viewerId.toString(), { browser, page });
@@ -1767,27 +1778,35 @@ exports.startViewer = async (viewerId) => {
     const randomDelay = Math.floor(Math.random() * 1000) + 500;
     await page.waitForTimeout(randomDelay);
     
-    // Navigate to the stream URL with enhanced timeouts and options
-    await page.goto(viewer.streamUrl, { 
-      waitUntil: 'domcontentloaded', // Initial load with domcontentloaded
-      timeout: 60000 // 60 seconds timeout
+    // Special mobile device settings
+    await page.emulate({
+      viewport: {
+        width: browserFingerprint.screenResolution.width,
+        height: browserFingerprint.screenResolution.height,
+        deviceScaleFactor: browserFingerprint.isIOS ? 3 : 2.75,
+        hasTouch: true,
+        isLandscape: browserFingerprint.isLandscape,
+        isMobile: true
+      },
+      userAgent: browserFingerprint.userAgent
     });
     
-    // Wait for necessary resources to load
-    await page.waitForTimeout(5000);
-    
-    // Now wait for network to be idle - this helps with dynamic content loading
+    // Navigate to the stream URL with enhanced timeouts and options for Kick.com
     try {
-      await page.waitForNavigation({ 
-        waitUntil: 'networkidle2', 
-        timeout: 15000 
-      }).catch(() => {}); // We'll continue even if this times out
-    } catch (error) {
-      logger.debug(`Network idle timeout for ${viewer.name}: ${error.message}`);
+      await page.goto(viewer.streamUrl, { 
+        waitUntil: 'domcontentloaded', // Initial load with domcontentloaded
+        timeout: 30000 // 30 seconds timeout
+      });
+      
+      // Wait for necessary resources to load
+      await page.waitForTimeout(5000);
+    } catch (navigationError) {
+      logger.warn(`Initial navigation had issues: ${navigationError.message}. Continuing anyway...`);
+      // We continue despite navigation errors as Kick.com sometimes has script errors
     }
     
-    // Handle potential barriers (cookie consent, etc.)
-    await handlePageBarriers(page);
+    // Handle page barriers (cookie consent, etc.)
+    await handleKickPageBarriers(page);
     
     // Kick.com specific video player selectors in priority order
     const kickVideoSelectors = [
@@ -1816,26 +1835,44 @@ exports.startViewer = async (viewerId) => {
     }
     
     if (!videoPlayerFound) {
-      // Try one last approach - sometimes the video player is in an iframe
-      const frames = page.frames();
-      for (const frame of frames) {
-        try {
-          for (const selector of kickVideoSelectors) {
-            const element = await frame.$(selector);
-            if (element) {
-              logger.info(`Video player found in iframe with selector "${selector}" for viewer ${viewer.name}`);
-              videoPlayerFound = true;
-              break;
-            }
-          }
-          if (videoPlayerFound) break;
-        } catch (frameError) {
-          logger.debug(`Error checking iframe for video: ${frameError.message}`);
+      // Try to handle 403 error page by reloading
+      const has403Error = await page.evaluate(() => {
+        return document.body.innerText.includes('403') || 
+               document.body.innerText.includes('Forbidden') ||
+               document.body.innerText.includes('Access Denied');
+      });
+      
+      if (has403Error) {
+        logger.warn(`403 Forbidden detected for ${viewer.name}, trying to recover`);
+        
+        // Increment failed attempts counter
+        failedAttempts.set(viewerId, (failedAttempts.get(viewerId) || 0) + 1);
+        
+        // Take a screenshot for debugging
+        const filename = `${viewerId}-403forbidden-${Date.now()}.png`;
+        const screenshotPath = path.join(screenshotsDir, filename);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        
+        // Update viewer with error
+        viewer.status = 'error';
+        viewer.error = '403 Forbidden detected - Kick.com bot protection';
+        viewer.lastScreenshot = filename;
+        await saveViewerWithLock(viewer);
+        
+        // Clean up
+        await browser.close().catch(() => {});
+        browserInstances.delete(viewerId.toString());
+        
+        // If we've had too many failed attempts, give up
+        if (failedAttempts.get(viewerId) > 3) {
+          throw new Error('Multiple 403 Forbidden responses - Kick.com is blocking this viewer');
         }
+        
+        // Try again with a different fingerprint
+        logger.info(`Retrying with a different mobile fingerprint`);
+        return exports.startViewer(viewerId);
       }
-    }
-    
-    if (!videoPlayerFound) {
+      
       logger.error(`No video player found for viewer ${viewer.name}`);
       
       // Take a screenshot to debug what's happening
@@ -1851,59 +1888,108 @@ exports.startViewer = async (viewerId) => {
       throw new Error('Video player not found after trying multiple selectors');
     }
     
-    // Try to play the stream more aggressively - Kick.com specific approach
+    // Ensure the video is playing using touch events for mobile
     await page.evaluate(() => {
-      // Try direct approach for Kick.com video player
       try {
+        // Function to create and dispatch touch events
+        function createAndDispatchTouchEvent(element, eventType) {
+          if (!element) return;
+          
+          const rect = element.getBoundingClientRect();
+          const touchObj = new Touch({
+            identifier: Date.now(),
+            target: element,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+            pageX: rect.left + rect.width / 2,
+            pageY: rect.top + rect.height / 2,
+            screenX: rect.left + rect.width / 2,
+            screenY: rect.top + rect.height / 2,
+            radiusX: 2.5,
+            radiusY: 2.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          
+          const touchEvent = new TouchEvent(eventType, {
+            cancelable: true,
+            bubbles: true,
+            touches: (eventType === 'touchend') ? [] : [touchObj],
+            targetTouches: (eventType === 'touchend') ? [] : [touchObj],
+            changedTouches: [touchObj]
+          });
+          
+          element.dispatchEvent(touchEvent);
+        }
+        
+        // Find Kick.com video player
         const kickVideo = document.querySelector('#video-player');
         if (kickVideo) {
-          kickVideo.play().catch(e => console.error('Error playing Kick video:', e));
+          console.log("Starting Kick.com video playback with mobile optimizations");
+          
+          // Apply mobile optimizations
           kickVideo.muted = false;
           kickVideo.volume = 0.5;
           kickVideo.controls = true;
+          kickVideo.playsInline = true;
           kickVideo.autoplay = true;
+          
+          // Create mobile touch events
+          createAndDispatchTouchEvent(kickVideo, 'touchstart');
+          setTimeout(() => {
+            createAndDispatchTouchEvent(kickVideo, 'touchend');
+            
+            // Try to play directly
+            kickVideo.play().catch(e => {
+              console.warn("Direct play failed, trying muted first:", e);
+              
+              // If autoplay was blocked, try with muted, then unmute
+              kickVideo.muted = true;
+              kickVideo.play().then(() => {
+                setTimeout(() => {
+                  kickVideo.muted = false;
+                  console.log("Unmuted after successful muted play");
+                }, 1000);
+              }).catch(e2 => console.error("Even muted play failed:", e2));
+            });
+          }, 100);
         } else {
-          // Fallback to any video element
+          // Fallback to generic video
           const videos = document.querySelectorAll('video');
           for (const video of videos) {
-            video.play().catch(e => console.error('Error playing video:', e));
             video.muted = false;
             video.volume = 0.5;
             video.controls = true;
+            video.playsInline = true;
             video.autoplay = true;
+            
+            createAndDispatchTouchEvent(video, 'touchstart');
+            setTimeout(() => {
+              createAndDispatchTouchEvent(video, 'touchend');
+              video.play().catch(e => console.warn("Failed to play video:", e));
+            }, 100);
           }
         }
-      } catch (e) {
-        console.error('Error while attempting to play video:', e);
-      }
-      
-      // Try to click any play buttons - Kick.com specific
-      try {
-        const kickPlayButtons = [
-          document.querySelector('.play-button'),
-          document.querySelector('.vjs-big-play-button'),
-          document.querySelector('.player-control-playpause'),
-          ...Array.from(document.querySelectorAll('button')).filter(b => 
-            (b.innerText || '').toLowerCase().includes('play') || 
-            (b.title || '').toLowerCase().includes('play') ||
-            (b.ariaLabel || '').toLowerCase().includes('play')
-          )
-        ].filter(Boolean);
         
-        for (const button of kickPlayButtons) {
-          try {
-            button.click();
-          } catch (e) {
-            // Ignore click errors
-          }
+        // Also try clicking play buttons
+        const playButtons = document.querySelectorAll(
+          '.play-button, .vjs-big-play-button, .player-control-playpause, ' + 
+          '.player__play-button, [aria-label="Play"], button.play'
+        );
+        
+        for (const button of playButtons) {
+          createAndDispatchTouchEvent(button, 'touchstart');
+          setTimeout(() => {
+            createAndDispatchTouchEvent(button, 'touchend');
+          }, 100);
         }
       } catch (e) {
-        console.error('Error while clicking play buttons:', e);
+        console.error("Error in mobile video playback:", e);
       }
     });
     
     // Check if the stream is live
-    const isLive = await checkStreamStatus(page);
+    const isLive = await checkKickStreamStatus(page);
     if (!isLive) {
       logger.warn(`Stream ${viewer.streamUrl} appears to be offline for viewer ${viewer.name}`);
     } else {
@@ -1911,7 +1997,7 @@ exports.startViewer = async (viewerId) => {
     }
     
     // Extract stream information
-    const streamMetadata = await extractStreamMetadata(page);
+    const streamMetadata = await extractKickMetadata(page);
     viewer.streamMetadata = streamMetadata;
     
     // Start the update interval for this viewer
@@ -1922,6 +2008,11 @@ exports.startViewer = async (viewerId) => {
     viewer.error = null;
     viewer.lastActivityAt = new Date();
     await saveViewerWithLock(viewer);
+    
+    // Reset failed attempts counter on success
+    if (failedAttempts.has(viewerId)) {
+      failedAttempts.delete(viewerId);
+    }
     
     // Check if stream exists in database, if not create it
     let stream = await Stream.findOne({ url: viewer.streamUrl });
@@ -1974,243 +2065,6 @@ exports.startViewer = async (viewerId) => {
       await browser.close().catch(() => {});
       browserInstances.delete(viewerId.toString());
     }
-    
-    throw error;
-  }
-};
-
-/**
- * Navigate to a stream
- * @param {string} viewerId - ID of the viewer
- * @param {string} streamUrl - URL of the stream to navigate to
- * @returns {Promise<boolean>} - Success status
- */
-exports.navigateToStream = async (viewerId, streamUrl) => {
-  const viewer = await Viewer.findById(viewerId);
-  
-  if (!viewer) {
-    throw new Error('Viewer not found');
-  }
-  
-  if (viewer.status !== 'running') {
-    throw new Error('Viewer is not running');
-  }
-  
-  if (!browserInstances.has(viewerId.toString())) {
-    throw new Error('Browser instance not found');
-  }
-  
-  logger.info(`Navigating viewer ${viewer.name} to stream ${streamUrl}`);
-  
-  try {
-    const { page } = browserInstances.get(viewerId.toString());
-    
-    // Add some random delay to appear more human-like
-    const randomDelay = Math.floor(Math.random() * 1000) + 500;
-    await page.waitForTimeout(randomDelay);
-    
-    // Navigate to the new stream URL
-    await page.goto(streamUrl, { 
-      waitUntil: 'domcontentloaded', // Initial load with domcontentloaded
-      timeout: 60000 // 60 seconds timeout
-    });
-    
-    // Wait for necessary resources to load
-    await page.waitForTimeout(5000);
-    
-    // Now wait for network to be idle - this helps with dynamic content loading
-    try {
-      await page.waitForNavigation({ 
-        waitUntil: 'networkidle2', 
-        timeout: 15000 
-      }).catch(() => {}); // We'll continue even if this times out
-    } catch (error) {
-      logger.debug(`Network idle timeout for ${viewer.name}: ${error.message}`);
-    }
-    
-    // Handle potential barriers (cookie consent, etc.)
-    await handlePageBarriers(page);
-    
-    // Kick.com specific video player selectors in priority order
-    const kickVideoSelectors = [
-      '#video-player',
-      '.player-no-controls',
-      '.stream-player video',
-      '.video-js video',
-      '.kick-player video',
-      '.channel-live video',
-      'video'
-    ];
-    
-    // Try to wait for video player with different selectors
-    let videoPlayerFound = false;
-    const timeout = config.puppeteer.defaultTimeout || 30000;
-    
-    for (const selector of kickVideoSelectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: timeout / kickVideoSelectors.length });
-        logger.info(`Video player found with selector "${selector}" for viewer ${viewer.name}`);
-        videoPlayerFound = true;
-        break;
-      } catch (selectorError) {
-        logger.debug(`Selector "${selector}" not found for viewer ${viewer.name}, trying next...`);
-      }
-    }
-    
-    if (!videoPlayerFound) {
-      // Try one last approach - sometimes the video player is in an iframe
-      const frames = page.frames();
-      for (const frame of frames) {
-        try {
-          for (const selector of kickVideoSelectors) {
-            const element = await frame.$(selector);
-            if (element) {
-              logger.info(`Video player found in iframe with selector "${selector}" for viewer ${viewer.name}`);
-              videoPlayerFound = true;
-              break;
-            }
-          }
-          if (videoPlayerFound) break;
-        } catch (frameError) {
-          logger.debug(`Error checking iframe for video: ${frameError.message}`);
-        }
-      }
-    }
-    
-    if (!videoPlayerFound) {
-      logger.error(`No video player found for viewer ${viewer.name}`);
-      
-      // Take a screenshot to debug what's happening
-      const filename = `${viewerId}-failed-${Date.now()}.png`;
-      const screenshotPath = path.join(screenshotsDir, filename);
-      await page.screenshot({ path: screenshotPath, fullPage: true });
-      logger.info(`Debug screenshot saved at ${screenshotPath}`);
-      
-      // Get page HTML for debugging
-      const pageHtml = await page.content();
-      logger.debug(`Page HTML for failed video player detection: ${pageHtml.substring(0, 500)}...`);
-      
-      throw new Error('Video player not found after trying multiple selectors');
-    }
-    
-    // Try to play the stream more aggressively - Kick.com specific approach
-    await page.evaluate(() => {
-      // Try direct approach for Kick.com video player
-      try {
-        const kickVideo = document.querySelector('#video-player');
-        if (kickVideo) {
-          kickVideo.play().catch(e => console.error('Error playing Kick video:', e));
-          kickVideo.muted = false;
-          kickVideo.volume = 0.5;
-          kickVideo.controls = true;
-          kickVideo.autoplay = true;
-        } else {
-          // Fallback to any video element
-          const videos = document.querySelectorAll('video');
-          for (const video of videos) {
-            video.play().catch(e => console.error('Error playing video:', e));
-            video.muted = false;
-            video.volume = 0.5;
-            video.controls = true;
-            video.autoplay = true;
-          }
-        }
-      } catch (e) {
-        console.error('Error while attempting to play video:', e);
-      }
-      
-      // Try to click any play buttons - Kick.com specific
-      try {
-        const kickPlayButtons = [
-          document.querySelector('.play-button'),
-          document.querySelector('.vjs-big-play-button'),
-          document.querySelector('.player-control-playpause'),
-          ...Array.from(document.querySelectorAll('button')).filter(b => 
-            (b.innerText || '').toLowerCase().includes('play') || 
-            (b.title || '').toLowerCase().includes('play') ||
-            (b.ariaLabel || '').toLowerCase().includes('play')
-          )
-        ].filter(Boolean);
-        
-        for (const button of kickPlayButtons) {
-          try {
-            button.click();
-          } catch (e) {
-            // Ignore click errors
-          }
-        }
-      } catch (e) {
-        console.error('Error while clicking play buttons:', e);
-      }
-    });
-    
-    // Check if the stream is live
-    const isLive = await checkStreamStatus(page);
-    if (!isLive) {
-      logger.warn(`Stream ${streamUrl} appears to be offline for viewer ${viewer.name}`);
-    } else {
-      logger.info(`Stream ${streamUrl} is live for viewer ${viewer.name}`);
-    }
-    
-    // Extract stream information
-    const streamMetadata = await extractStreamMetadata(page);
-    viewer.streamMetadata = streamMetadata;
-    
-    // Update viewer
-    viewer.streamUrl = streamUrl;
-    viewer.streamer = streamMetadata.streamerName || streamUrl.split('/').pop();
-    viewer.lastActivityAt = new Date();
-    await saveViewerWithLock(viewer);
-    
-    // Check if stream exists in database, if not create it
-    let stream = await Stream.findOne({ url: streamUrl });
-    if (!stream) {
-      stream = new Stream({
-        url: streamUrl,
-        streamer: viewer.streamer,
-        title: streamMetadata.title || '',
-        game: streamMetadata.game || '',
-        viewers: streamMetadata.viewers || 0,
-        isLive: isLive,
-        activeViewers: [viewer._id],
-      });
-      await stream.save();
-    } else {
-      // Update stream info
-      stream.title = streamMetadata.title || stream.title;
-      stream.game = streamMetadata.game || stream.game;
-      stream.viewers = streamMetadata.viewers || stream.viewers;
-      stream.isLive = isLive;
-      
-      // Add this viewer to active viewers if not already added
-      if (!stream.activeViewers.includes(viewer._id)) {
-        stream.activeViewers.push(viewer._id);
-      }
-      await stream.save();
-    }
-    
-    // Remove from previous stream
-    await Stream.updateMany(
-      { url: { $ne: streamUrl }, activeViewers: viewer._id },
-      { $pull: { activeViewers: viewer._id } }
-    );
-    
-    logger.info(`Viewer ${viewer.name} navigated to stream ${streamUrl}`);
-    
-    // Take a screenshot after navigation
-    try {
-      await exports.takeScreenshot(viewerId);
-    } catch (screenshotError) {
-      logger.warn(`Failed to take navigation screenshot: ${screenshotError.message}`);
-    }
-    
-    return true;
-  } catch (error) {
-    logger.error(`Error navigating viewer ${viewer.name} to ${streamUrl}: ${error.message}`);
-    
-    // Update viewer error
-    viewer.error = error.message;
-    await saveViewerWithLock(viewer);
     
     throw error;
   }
@@ -2307,11 +2161,12 @@ exports.takeScreenshot = async (viewerId) => {
     const filename = `${viewerId}-${uuidv4()}.png`;
     const screenshotPath = path.join(screenshotsDir, filename);
     
-    // Take screenshot
+    // Take screenshot - use mobile viewport size
     await page.screenshot({ 
       path: screenshotPath, 
       fullPage: false,
-      type: 'png'
+      type: 'png',
+      captureBeyondViewport: true
     });
     
     logger.info(`Screenshot taken for viewer ${viewer.name}: ${filename}`);
@@ -2329,115 +2184,7 @@ exports.takeScreenshot = async (viewerId) => {
 };
 
 /**
- * Set up page event listeners
- * @param {Object} page - Puppeteer page object
- * @param {Object} viewer - Viewer model instance
- */
-async function setupPageEventListeners(page, viewer) {
-  // Log console messages
-  page.on('console', async (msg) => {
-    const logLevel = msg.type() === 'error' ? 'error' : 
-                    msg.type() === 'warning' ? 'warn' : 'debug';
-    
-    if (logLevel === 'error' || logLevel === 'warn') {
-      // Only log errors and warnings to avoid too much noise
-      logger[logLevel](`Console ${msg.type()} (${viewer.name}): ${msg.text()}`);
-      
-      // Add to viewer logs
-      viewer.logs.push({
-        level: logLevel,
-        message: `Console ${msg.type()}: ${msg.text()}`,
-      });
-      
-      // If too many logs, remove oldest
-      if (viewer.logs.length > 100) {
-        viewer.logs = viewer.logs.slice(-100);
-      }
-      
-      await saveViewerWithLock(viewer);
-    }
-  });
-  
-  // Log page errors
-  page.on('error', async (error) => {
-    logger.error(`Page error for viewer ${viewer.name}: ${error.message}`);
-    
-    // Add to viewer logs
-    viewer.logs.push({
-      level: 'error',
-      message: `Page error: ${error.message}`,
-    });
-    
-    // If too many logs, remove oldest
-    if (viewer.logs.length > 100) {
-      viewer.logs = viewer.logs.slice(-100);
-    }
-    
-    await saveViewerWithLock(viewer);
-  });
-  
-  // Log navigation and responses
-  page.on('response', async (response) => {
-    const status = response.status();
-    const url = response.url();
-    
-    // Only log failed responses or important responses for Kick.com
-    if ((status >= 400 || url.includes('auth') || url.includes('login') || url.includes('stream') || 
-         url.includes('chat') || url.includes('video') || url.includes('player')) &&
-        url.includes('kick.com')) {
-      logger.debug(`Response ${status} for ${url} (${viewer.name})`);
-      
-      // For certain critical errors, log them to the viewer logs
-      if (status >= 500 || (status >= 400 && url.includes('stream'))) {
-        viewer.logs.push({
-          level: 'warn',
-          message: `Response ${status} for ${url}`,
-        });
-        
-        // If too many logs, remove oldest
-        if (viewer.logs.length > 100) {
-          viewer.logs = viewer.logs.slice(-100);
-        }
-        
-        await saveViewerWithLock(viewer);
-      }
-    }
-  });
-  
-  // Handle dialog events (alerts, confirms, prompts)
-  page.on('dialog', async (dialog) => {
-    logger.info(`Dialog appeared for viewer ${viewer.name}: ${dialog.message()}`);
-    
-    // Add to viewer logs
-    viewer.logs.push({
-      level: 'info',
-      message: `Dialog: ${dialog.type()} - ${dialog.message()}`,
-    });
-    
-    // If too many logs, remove oldest
-    if (viewer.logs.length > 100) {
-      viewer.logs = viewer.logs.slice(-100);
-    }
-    
-    await saveViewerWithLock(viewer);
-    
-    // Dismiss dialog to not block the page
-    await dialog.dismiss().catch(() => {});
-  });
-  
-  // Handle frame navigation for detecting redirects
-  page.on('framenavigated', async (frame) => {
-    if (frame === page.mainFrame()) {
-      const url = frame.url();
-      if (url.includes('kick.com')) {
-        logger.debug(`Main frame navigated to: ${url} (${viewer.name})`);
-      }
-    }
-  });
-}
-
-/**
- * Start an update interval for a viewer
+ * Start update interval for a viewer
  * @param {string} viewerId - ID of the viewer
  */
 function startUpdateInterval(viewerId) {
@@ -2447,15 +2194,15 @@ function startUpdateInterval(viewerId) {
   // Create a new interval
   updateIntervals[viewerId] = setInterval(async () => {
     try {
-      await updateViewerStatus(viewerId);
+      await updateViewerData(viewerId);
     } catch (error) {
       logger.error(`Error updating viewer ${viewerId}: ${error.message}`);
     }
-  }, config.puppeteer.updateInterval || 30000);
+  }, config.viewer.updateInterval || 15000); // Shorter interval for mobile streams
 }
 
 /**
- * Clear the update interval for a viewer
+ * Clear update interval for a viewer
  * @param {string} viewerId - ID of the viewer
  */
 function clearUpdateInterval(viewerId) {
@@ -2466,128 +2213,637 @@ function clearUpdateInterval(viewerId) {
 }
 
 /**
- * Update the status of a viewer
+ * Update viewer data specifically for Kick.com
  * @param {string} viewerId - ID of the viewer
  */
-async function updateViewerStatus(viewerId) {
+async function updateViewerData(viewerId) {
   const viewer = await Viewer.findById(viewerId);
   
   if (!viewer || viewer.status !== 'running') {
-    clearUpdateInterval(viewerId);
     return;
   }
   
   if (!browserInstances.has(viewerId.toString())) {
-    logger.warn(`Browser instance not found for viewer ${viewer.name}`);
-    
-    // Update viewer status
-    viewer.status = 'error';
-    viewer.error = 'Browser instance not found';
-    await saveViewerWithLock(viewer);
-    
-    clearUpdateInterval(viewerId);
     return;
   }
   
+  const { page } = browserInstances.get(viewerId.toString());
+  
   try {
-    const { page } = browserInstances.get(viewerId.toString());
-    
-    // Check if page is closed
-    if (page.isClosed()) {
-      logger.warn(`Page is closed for viewer ${viewer.name}`);
-      
-      // Update viewer status
-      viewer.status = 'error';
-      viewer.error = 'Page is closed';
-      await saveViewerWithLock(viewer);
-      
-      clearUpdateInterval(viewerId);
-      return;
+    // For Kick.com mobile, perform more frequent interactions to keep stream active
+    if (Math.random() < 0.6) { // 60% chance of interaction
+      await simulateMobileInteraction(page);
     }
     
-    // Check if the stream is live
-    const isLive = await checkStreamStatus(page);
-    
-    // Extract stream information
-    const streamMetadata = await extractStreamMetadata(page);
-    
-    // Extract playback status
-    const playbackStatus = await extractPlaybackStatus(page);
-    
-    // Extract chat messages
-    const chatMessages = await extractChatMessages(page);
-    
-    // Update viewer with new information
-    viewer.streamMetadata = streamMetadata;
-    viewer.playbackStatus = playbackStatus;
-    viewer.lastActivityAt = new Date();
-    
-    // Store last few chat messages
-    if (chatMessages.length > 0) {
-      // Only store the last 50 messages
-      viewer.chatMessages = chatMessages.slice(-50);
-    }
-    
-    await saveViewerWithLock(viewer);
-    
-    // Update the stream document
-    if (viewer.streamUrl) {
-      const stream = await Stream.findOne({ url: viewer.streamUrl });
-      if (stream) {
-        stream.title = streamMetadata.title || stream.title;
-        stream.game = streamMetadata.game || stream.game;
-        stream.viewers = streamMetadata.viewers || stream.viewers;
-        stream.isLive = isLive;
-        
-        // Make sure this viewer is in the active viewers
-        if (!stream.activeViewers.includes(viewer._id)) {
-          stream.activeViewers.push(viewer._id);
+    // Ensure video is playing by directly interacting with Kick.com player
+    await page.evaluate(() => {
+      try {
+        // Function to create touch events (important for mobile)
+        function createAndDispatchTouchEvent(element, eventType) {
+          if (!element) return;
+          
+          const rect = element.getBoundingClientRect();
+          const touchObj = new Touch({
+            identifier: Date.now(),
+            target: element,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+            pageX: rect.left + rect.width / 2,
+            pageY: rect.top + rect.height / 2,
+            screenX: rect.left + rect.width / 2,
+            screenY: rect.top + rect.height / 2,
+            radiusX: 2.5,
+            radiusY: 2.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          
+          const touchEvent = new TouchEvent(eventType, {
+            cancelable: true,
+            bubbles: true,
+            touches: (eventType === 'touchend') ? [] : [touchObj],
+            targetTouches: (eventType === 'touchend') ? [] : [touchObj],
+            changedTouches: [touchObj]
+          });
+          
+          element.dispatchEvent(touchEvent);
         }
         
-        await stream.save();
+        // Check for Kick.com specific video player
+        const kickPlayer = document.querySelector('#video-player');
+        if (kickPlayer) {
+          // Ping the player with a touch event to keep it active
+          createAndDispatchTouchEvent(kickPlayer, 'touchstart');
+          setTimeout(() => {
+            createAndDispatchTouchEvent(kickPlayer, 'touchend');
+          }, 50);
+          
+          // Ensure playback is active
+          if (kickPlayer.paused) {
+            console.log("Restarting paused Kick player");
+            kickPlayer.play().catch(e => console.error('Error playing video:', e));
+          }
+          
+          // Ensure not muted
+          if (kickPlayer.muted) {
+            kickPlayer.muted = false;
+          }
+          
+          // Set reasonable volume
+          kickPlayer.volume = 0.5;
+        } else {
+          // Fallback to generic video element
+          const video = document.querySelector('video');
+          if (video) {
+            // Touch the video
+            createAndDispatchTouchEvent(video, 'touchstart');
+            setTimeout(() => {
+              createAndDispatchTouchEvent(video, 'touchend');
+            }, 50);
+            
+            if (video.paused) {
+              video.play().catch(e => console.error('Error playing video:', e));
+            }
+            if (video.muted) {
+              video.muted = false;
+              video.volume = 0.5;
+            }
+          }
+        }
+        
+        // Check for error overlays and dismiss them
+        const errorOverlays = document.querySelectorAll('.player-error, .error-message, .player-error-overlay');
+        for (const overlay of errorOverlays) {
+          // Try to make it invisible
+          overlay.style.display = 'none';
+          
+          // Try finding any buttons to dismiss the error
+          const buttons = overlay.querySelectorAll('button');
+          for (const button of buttons) {
+            createAndDispatchTouchEvent(button, 'touchstart');
+            setTimeout(() => {
+              createAndDispatchTouchEvent(button, 'touchend');
+            }, 50);
+          }
+        }
+      } catch (e) {
+        console.error('Error ensuring video playback:', e);
+      }
+    });
+    
+    // Check if stream is still live
+    const isLive = await checkKickStreamStatus(page);
+    
+    // Extract stream metadata
+    const streamMetadata = await extractKickMetadata(page);
+    
+    // Extract playback status
+    const playbackStatus = await extractKickPlaybackStatus(page);
+    
+    // Extract chat messages if this viewer has chat parsing enabled
+    if (viewer.isParseChatEnabled) {
+      try {
+        const chatMessages = await extractKickChatMessages(page);
+        
+        // Update stream with chat messages
+        if (chatMessages && chatMessages.length > 0) {
+          await Stream.updateOne(
+            { url: viewer.streamUrl },
+            { 
+              $push: { 
+                chatMessages: {
+                  $each: chatMessages.map(msg => ({
+                    ...msg,
+                    viewerId: viewer._id
+                  })),
+                  $slice: -1000 // Keep the most recent 1000 messages
+                }
+              },
+              title: streamMetadata.title || undefined,
+              game: streamMetadata.game || undefined,
+              viewers: streamMetadata.viewers || undefined,
+              isLive: isLive,
+              lastUpdated: new Date()
+            }
+          );
+        }
+      } catch (chatError) {
+        logger.debug(`Error extracting chat: ${chatError.message}`);
       }
     }
     
-    // Take a screenshot occasionally (every ~5 minutes)
-    if (Math.random() < 0.1) {
+    // Take a screenshot periodically (every 15th update)
+    const viewerUpdateCount = viewer.updateCount || 0;
+    if (viewerUpdateCount % 15 === 0) {
       try {
         await exports.takeScreenshot(viewerId);
       } catch (screenshotError) {
-        logger.warn(`Failed to take periodic screenshot: ${screenshotError.message}`);
+        logger.debug(`Failed to take periodic screenshot: ${screenshotError.message}`);
       }
     }
     
-    // If playback is stuck with an error, try to refresh
-    if (playbackStatus.error && !viewer.lastRefreshAt) {
-      logger.info(`Playback error detected for ${viewer.name}, refreshing...`);
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await handlePageBarriers(page);
-      viewer.lastRefreshAt = new Date();
-      await saveViewerWithLock(viewer);
-    } else if (playbackStatus.error && viewer.lastRefreshAt) {
-      // If we already tried refreshing and still have errors
-      const timeSinceRefresh = new Date() - new Date(viewer.lastRefreshAt);
-      if (timeSinceRefresh > 5 * 60 * 1000) {
-        // More than 5 minutes since last refresh, try again
-        logger.info(`Playback still has errors for ${viewer.name}, refreshing again...`);
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        await handlePageBarriers(page);
-        viewer.lastRefreshAt = new Date();
-        await saveViewerWithLock(viewer);
+    // Update stream data if it has changed
+    if (streamMetadata.title || streamMetadata.game || streamMetadata.viewers) {
+      await Stream.updateOne(
+        { url: viewer.streamUrl },
+        {
+          $set: {
+            title: streamMetadata.title || undefined,
+            game: streamMetadata.game || undefined,
+            viewers: streamMetadata.viewers || undefined,
+            isLive: isLive,
+            lastUpdated: new Date()
+          }
+        }
+      );
+    }
+    
+    // Update viewer data
+    viewer.streamMetadata = {
+      ...viewer.streamMetadata,
+      ...streamMetadata,
+      isLive
+    };
+    viewer.playbackStatus = playbackStatus;
+    viewer.lastActivityAt = new Date();
+    viewer.updateCount = (viewerUpdateCount + 1);
+    await saveViewerWithLock(viewer);
+    
+    // For Kick.com, handle stream issues more aggressively
+    if (!isLive || !playbackStatus.isPlaying || playbackStatus.isBuffering || playbackStatus.error) {
+      logger.warn(`Stream issues detected for viewer ${viewer.name}: isLive=${isLive}, isPlaying=${playbackStatus.isPlaying}, isBuffering=${playbackStatus.isBuffering}, error=${playbackStatus.error}`);
+      
+      // Add to viewer logs
+      viewer.logs.push({
+        level: 'warn',
+        message: `Stream issues: ${!isLive ? 'Offline' : playbackStatus.error || 'Playback problem'}`,
+      });
+      
+      // If too many logs, remove oldest
+      if (viewer.logs.length > 100) {
+        viewer.logs = viewer.logs.slice(-100);
       }
-    } else if (!playbackStatus.error && viewer.lastRefreshAt) {
-      // Clear the lastRefreshAt if we no longer have errors
-      viewer.lastRefreshAt = null;
+      
       await saveViewerWithLock(viewer);
+      
+      // Try to recover with specialized mobile-focused fixes
+      await fixKickStreamIssues(viewerId);
     }
   } catch (error) {
-    logger.error(`Error updating viewer ${viewer.name}: ${error.message}`);
+    logger.error(`Error updating data for viewer ${viewer.name}: ${error.message}`);
     
-    // Update viewer error
-    viewer.error = error.message;
+    // Add to viewer logs
+    viewer.logs.push({
+      level: 'error',
+      message: `Update error: ${error.message}`,
+    });
+    
+    // If too many logs, remove oldest
+    if (viewer.logs.length > 100) {
+      viewer.logs = viewer.logs.slice(-100);
+    }
+    
     await saveViewerWithLock(viewer);
   }
 }
 
-// Export functions
-module.exports = exports;
+/**
+ * Simulate mobile-like interaction for Kick.com
+ * @param {Object} page - Puppeteer page object
+ */
+async function simulateMobileInteraction(page) {
+  try {
+    // Mobile-specific interactions to keep Kick.com streams alive
+    await page.evaluate(() => {
+      try {
+        // Function to create touch events
+        function createTouchEvent(element, eventType) {
+          if (!element) return;
+          
+          const rect = element.getBoundingClientRect();
+          const touchObj = new Touch({
+            identifier: Date.now(),
+            target: element,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+            pageX: rect.left + rect.width / 2,
+            pageY: rect.top + rect.height / 2,
+            screenX: rect.left + rect.width / 2,
+            screenY: rect.top + rect.height / 2,
+            radiusX: 2.5,
+            radiusY: 2.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          
+          const touchEvent = new TouchEvent(eventType, {
+            cancelable: true,
+            bubbles: true,
+            touches: (eventType === 'touchend') ? [] : [touchObj],
+            targetTouches: (eventType === 'touchend') ? [] : [touchObj],
+            changedTouches: [touchObj]
+          });
+          
+          element.dispatchEvent(touchEvent);
+        }
+        
+        // Find the video player
+        const videoPlayer = document.querySelector('#video-player') || document.querySelector('video');
+        if (videoPlayer) {
+          // Touch the video player to keep it active
+          createTouchEvent(videoPlayer, 'touchstart');
+          setTimeout(() => createTouchEvent(videoPlayer, 'touchend'), 50);
+          
+          // Ensure player stays unmuted and at good volume
+          if (videoPlayer.muted) videoPlayer.muted = false;
+          videoPlayer.volume = 0.5;
+          
+          // Touch around the player slightly to simulate engagement
+          const playerRect = videoPlayer.getBoundingClientRect();
+          const touchPositions = [
+            { x: playerRect.width * 0.25, y: playerRect.height * 0.25 },
+            { x: playerRect.width * 0.75, y: playerRect.height * 0.75 },
+            { x: playerRect.width * 0.5, y: playerRect.height * 0.5 }
+          ];
+          
+          // Choose a random position
+          const position = touchPositions[Math.floor(Math.random() * touchPositions.length)];
+          
+          // Create a touch at this position
+          const touchElement = document.elementFromPoint(
+            playerRect.left + position.x,
+            playerRect.top + position.y
+          );
+          
+          if (touchElement) {
+            createTouchEvent(touchElement, 'touchstart');
+            setTimeout(() => createTouchEvent(touchElement, 'touchend'), 50);
+          }
+          
+          return true;
+        }
+        
+        return false;
+      } catch (error) {
+        console.error('Error during mobile interaction:', error);
+        return false;
+      }
+    });
+    
+    // Sometimes simulate a mobile scroll to keep the page active
+    if (Math.random() < 0.3) {
+      await page.evaluate(() => {
+        const scrollAmount = Math.floor(Math.random() * 50) - 25; // Small scroll up or down
+        window.scrollBy(0, scrollAmount);
+      });
+    }
+  } catch (error) {
+    logger.debug(`Error simulating mobile interaction: ${error.message}`);
+    // Ignore errors
+  }
+}
+
+/**
+ * Fix Kick.com stream issues with mobile-focused approach
+ * @param {string} viewerId - ID of the viewer
+ */
+async function fixKickStreamIssues(viewerId) {
+  try {
+    const { page } = browserInstances.get(viewerId.toString());
+    logger.info(`Attempting to fix Kick.com stream issues for viewer ${viewerId}`);
+    
+    // First check if there's a 403 Forbidden error
+    const has403Error = await page.evaluate(() => {
+      return document.body.innerText.includes('403') || 
+             document.body.innerText.includes('Forbidden') ||
+             document.body.innerText.includes('Access Denied');
+    });
+    
+    if (has403Error) {
+      logger.warn(`403 Forbidden detected during stream - Kick's bot protection triggered`);
+      
+      // Take a screenshot for debugging
+      const filename = `${viewerId}-403forbidden-${Date.now()}.png`;
+      const screenshotPath = path.join(screenshotsDir, filename);
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      
+      // Update counter and try to reload
+      failedAttempts.set(viewerId, (failedAttempts.get(viewerId) || 0) + 1);
+      
+      // Reload the page
+      await page.goto(page.url(), { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(3000);
+      
+      // Check if still has 403
+      const stillHas403 = await page.evaluate(() => {
+        return document.body.innerText.includes('403') || 
+               document.body.innerText.includes('Forbidden') ||
+               document.body.innerText.includes('Access Denied');
+      });
+      
+      if (stillHas403) {
+        // If we've had too many failures, we need to restart with a fresh fingerprint
+        if ((failedAttempts.get(viewerId) || 0) > 2) {
+          logger.error(`Too many 403 errors, restarting with fresh fingerprint`);
+          
+          // Update viewer status
+          const viewer = await Viewer.findById(viewerId);
+          viewer.error = "Kick.com bot protection - restarting with fresh fingerprint";
+          await saveViewerWithLock(viewer);
+          
+          // Stop and restart with fresh fingerprint
+          await exports.stopViewer(viewerId);
+          setTimeout(() => {
+            exports.startViewer(viewerId).catch(e => 
+              logger.error(`Failed to restart viewer after 403: ${e.message}`)
+            );
+          }, 5000);
+          
+          return false;
+        }
+      }
+    }
+    
+    // Use mobile-specific video recovery techniques
+    const videoFixed = await page.evaluate(() => {
+      try {
+        // Function to create touch events (important for mobile)
+        function createAndDispatchTouchEvent(element, eventType) {
+          if (!element) return;
+          
+          const rect = element.getBoundingClientRect();
+          const touchObj = new Touch({
+            identifier: Date.now(),
+            target: element,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+            pageX: rect.left + rect.width / 2,
+            pageY: rect.top + rect.height / 2,
+            screenX: rect.left + rect.width / 2,
+            screenY: rect.top + rect.height / 2,
+            radiusX: 2.5,
+            radiusY: 2.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          
+          const touchEvent = new TouchEvent(eventType, {
+            cancelable: true,
+            bubbles: true,
+            touches: (eventType === 'touchend') ? [] : [touchObj],
+            targetTouches: (eventType === 'touchend') ? [] : [touchObj],
+            changedTouches: [touchObj]
+          });
+          
+          element.dispatchEvent(touchEvent);
+        }
+        
+        // APPROACH 1: Try to find and fix video element
+        const kickVideo = document.querySelector('#video-player');
+        if (kickVideo) {
+          console.log("Applying mobile video recovery techniques to Kick player");
+          
+          // Check video state
+          const wasPlaying = !kickVideo.paused;
+          const wasMuted = kickVideo.muted;
+          const currentTime = kickVideo.currentTime;
+          
+          // Create touch events to activate the player
+          createAndDispatchTouchEvent(kickVideo, 'touchstart');
+          setTimeout(() => {
+            createAndDispatchTouchEvent(kickVideo, 'touchend');
+            
+            // Mobile-specific: sometimes there's an overlay blocking interaction
+            const overlays = document.querySelectorAll('.overlay, .player-overlay, [class*="overlay"]');
+            for (const overlay of overlays) {
+              createAndDispatchTouchEvent(overlay, 'touchstart');
+              setTimeout(() => createAndDispatchTouchEvent(overlay, 'touchend'), 100);
+            }
+            
+            // Try to play
+            kickVideo.play().catch(e => {
+              console.warn("Direct play failed, trying with mobile workarounds:", e);
+              
+              // First try with muted
+              kickVideo.muted = true;
+              kickVideo.play().then(() => {
+                // Success with muted, now try to unmute
+                setTimeout(() => {
+                  kickVideo.muted = false;
+                  console.log("Unmuted after recovery");
+                }, 1000);
+              }).catch(e2 => {
+                console.error("Even muted play failed, trying reload:", e2);
+                
+                // If that fails, try reloading the video
+                kickVideo.load();
+                kickVideo.currentTime = currentTime > 5 ? currentTime - 5 : 0;
+                
+                // After reload, try again
+                setTimeout(() => {
+                  kickVideo.play().catch(e3 => console.error("Final play attempt failed:", e3));
+                }, 1000);
+              });
+            });
+          }, 100);
+          
+          return true;
+        }
+        
+        // APPROACH 2: Try to click play buttons
+        const playButtons = document.querySelectorAll(
+          '.play-button, .vjs-big-play-button, .player-control-playpause, .player__play-button, ' +
+          '[aria-label="Play"], button.play, .control-icon-container[class*="play"]'
+        );
+        
+        if (playButtons.length > 0) {
+          console.log(`Found ${playButtons.length} play buttons, clicking them`);
+          
+          for (const button of playButtons) {
+            createAndDispatchTouchEvent(button, 'touchstart');
+            setTimeout(() => createAndDispatchTouchEvent(button, 'touchend'), 100);
+          }
+          
+          return true;
+        }
+        
+        // APPROACH 3: Look for stalled message and retry
+        const errorMessages = document.querySelectorAll('.error-message, .player-error, .stalled-message');
+        if (errorMessages.length > 0) {
+          console.log("Found error messages, looking for retry buttons");
+          
+          // Look for retry buttons
+          const retryButtons = document.querySelectorAll(
+            'button[class*="retry"], button[class*="reload"], [class*="try-again"]'
+          );
+          
+          if (retryButtons.length > 0) {
+            for (const button of retryButtons) {
+              createAndDispatchTouchEvent(button, 'touchstart');
+              setTimeout(() => createAndDispatchTouchEvent(button, 'touchend'), 100);
+            }
+            return true;
+          }
+        }
+        
+        return false;
+      } catch (e) {
+        console.error("Error in fixKickStreamIssues:", e);
+        return false;
+      }
+    });
+    
+    // If that didn't work, try reloading the page
+    if (!videoFixed) {
+      logger.info("Mobile video fix attempts didn't work, trying page reload");
+      
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(3000);
+      
+      // Handle page barriers again
+      await handleKickPageBarriers(page);
+    }
+    
+    return true;
+  } catch (error) {
+    logger.error(`Error fixing Kick stream issues: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Force refresh a Kick.com stream to recover from issues
+ * @param {string} viewerId - ID of the viewer
+ */
+exports.forceRefreshKickStream = async (viewerId) => {
+  const viewer = await Viewer.findById(viewerId);
+  
+  if (!viewer) {
+    throw new Error('Viewer not found');
+  }
+  
+  if (viewer.status !== 'running') {
+    throw new Error('Viewer is not running');
+  }
+  
+  if (!browserInstances.has(viewerId.toString())) {
+    throw new Error('Browser instance not found');
+  }
+  
+  logger.info(`Forcing refresh for Kick.com stream for viewer ${viewer.name}`);
+  
+  try {
+    const { page } = browserInstances.get(viewerId.toString());
+    
+    // Update viewer status
+    viewer.status = 'refreshing';
+    await saveViewerWithLock(viewer);
+    
+    // Remember the current URL
+    const currentUrl = page.url();
+    
+    // Navigate away to a blank page first (helps clear state)
+    await page.goto('about:blank', { waitUntil: 'load' });
+    await page.waitForTimeout(1000);
+    
+    // Now navigate back to the stream with a fresh load
+    await page.goto(currentUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000);
+    
+    // Handle page barriers and ensure playback
+    await handleKickPageBarriers(page);
+    
+    // Check if stream is now playing
+    const playbackStatus = await extractKickPlaybackStatus(page);
+    
+    // Update viewer status
+    viewer.status = 'running';
+    viewer.playbackStatus = playbackStatus;
+    viewer.lastActivityAt = new Date();
+    await saveViewerWithLock(viewer);
+    
+    logger.info(`Force refresh completed for viewer ${viewer.name}`);
+    
+    // Take a screenshot to confirm state
+    try {
+      await exports.takeScreenshot(viewerId);
+    } catch (screenshotError) {
+      logger.debug(`Failed to take post-refresh screenshot: ${screenshotError.message}`);
+    }
+    
+    return playbackStatus.isPlaying;
+  } catch (error) {
+    logger.error(`Error during force refresh for viewer ${viewer.name}: ${error.message}`);
+    
+    // Update viewer status back to running
+    viewer.status = 'running';
+    viewer.error = `Force refresh failed: ${error.message}`;
+    await saveViewerWithLock(viewer);
+    
+    throw error;
+  }
+};
+
+// Export helper functions and interval management
+module.exports = {
+  startViewer: exports.startViewer,
+  navigateToStream: exports.navigateToStream,
+  stopViewer: exports.stopViewer,
+  takeScreenshot: exports.takeScreenshot,
+  forceRefreshKickStream: exports.forceRefreshKickStream,
+  saveViewerWithLock,
+  startUpdateInterval,
+  clearUpdateInterval,
+  updateViewerData,
+  applyMobileFingerprinting,
+  generateMobileFingerprint,
+  extractKickMetadata,
+  checkKickStreamStatus,
+  handleKickPageBarriers,
+  setupKickRequestInterception,
+  extractKickPlaybackStatus,
+  extractKickChatMessages,
+  simulateMobileInteraction,
+  fixKickStreamIssues,
+  getTimezoneString
+};

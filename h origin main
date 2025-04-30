@@ -1,0 +1,35 @@
+[33mcommit 4a51c4487f6d48e939238ec5ef867325b08d9f87[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m)[m
+Author: CursedScorpio <myfromcs2d@gmail.com>
+Date:   Wed Apr 30 17:38:02 2025 +0200
+
+    More optimized viewer, and better selector for stream element
+
+[33mcommit 8ad0b422a1d64942589f46264b9f74b265afefe2[m[33m ([m[1;31morigin/main[m[33m)[m
+Author: Ubuntu <Cursed@Cursed.fgg5odlhdfvetplfpc3qxnu5pd.ax.internal.cloudapp.net>
+Date:   Wed Apr 30 07:25:11 2025 +0000
+
+    Remove node_modules from tracking
+
+[33mcommit 2612566a1fcfe9c72179562bb8352a373ad2b5ed[m
+Author: Ubuntu <Cursed@Cursed.fgg5odlhdfvetplfpc3qxnu5pd.ax.internal.cloudapp.net>
+Date:   Wed Apr 30 07:24:03 2025 +0000
+
+    Remove node_modules from tracking
+
+[33mcommit 081ecd577e44c7a47df02597cb28b1993e950a56[m
+Author: root <root@vmi2419838.contaboserver.net>
+Date:   Wed Apr 30 09:16:19 2025 +0200
+
+    Add .gitignore
+
+[33mcommit 01ecaa20a448e67b1762d0fdf4f137696c89aeab[m
+Author: CursedScorpio <152615553+CursedScorpio@users.noreply.github.com>
+Date:   Wed Apr 30 10:14:09 2025 +0300
+
+    Update README.md
+
+[33mcommit b3e3d5205ea9d76b22dc29d0b6b1f0f7ca1c9162[m
+Author: root <root@vmi2419838.contaboserver.net>
+Date:   Wed Apr 30 09:10:03 2025 +0200
+
+    Initial project commit
