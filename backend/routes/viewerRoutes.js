@@ -18,6 +18,12 @@ router.post('/:id/stop', viewerController.stopViewer);
 // Get viewer status
 router.get('/:id/status', viewerController.getViewerStatus);
 
+// Get viewer resource usage
+router.get('/:id/resources', viewerController.getViewerResourceUsage);
+
+// Update viewer resource limits
+router.put('/:id/resources/limits', viewerController.updateViewerResourceLimits);
+
 // Get viewer screenshot
 router.post('/:id/screenshot', viewerController.getViewerScreenshot);
 

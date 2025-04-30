@@ -7,10 +7,58 @@ import Button from '../UI/Button';
 import StatusBadge from '../UI/StatusBadge';
 
 const ViewerCard = ({ viewer }) => {
-  const { stopViewer, updateViewer, setSelectedViewer } = useAppContext();
+  const { stopViewer, updateViewer, setSelectedViewer, viewerResources } = useAppContext();
   const [streamUrl, setStreamUrl] = useState('');
   const [isStreamFormVisible, setIsStreamFormVisible] = useState(false);
   const navigate = useNavigate();
+  
+  // Get resources for this viewer
+  const resources = viewerResources[viewer._id];
+  
+  // Function to get status color
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'running':
+        return 'bg-green-500';
+      case 'starting':
+        return 'bg-blue-500';
+      case 'stopping':
+        return 'bg-yellow-500';
+      case 'error':
+        return 'bg-red-500';
+      default:
+        return 'bg-gray-500';
+    }
+  };
+  
+  // Function to format status text
+  const formatStatus = (status) => {
+    return status.charAt(0).toUpperCase() + status.slice(1);
+  };
+  
+  // Add this function to determine resource status color
+  const getResourceStatusColor = () => {
+    if (!resources) return 'bg-gray-600';
+    
+    // Check if any resource is above 80% of its limit
+    const resourceLimits = resources.resourceLimits || { cpuLimit: 100, memoryLimit: 500, networkLimit: 5 };
+    
+    if (resources.cpu > resourceLimits.cpuLimit * 0.8 || 
+        resources.memory > resourceLimits.memoryLimit * 0.8 || 
+        (resources.networkRx + resources.networkTx) > resourceLimits.networkLimit * 0.8) {
+      return 'bg-red-600';
+    }
+    
+    // Check if any resource is above 60% of its limit
+    if (resources.cpu > resourceLimits.cpuLimit * 0.6 || 
+        resources.memory > resourceLimits.memoryLimit * 0.6 || 
+        (resources.networkRx + resources.networkTx) > resourceLimits.networkLimit * 0.6) {
+      return 'bg-yellow-500';
+    }
+    
+    // Otherwise good
+    return 'bg-green-500';
+  };
   
   const handleViewDetails = () => {
     setSelectedViewer(viewer);
@@ -59,7 +107,20 @@ const ViewerCard = ({ viewer }) => {
               Box: {viewer.box?.name || 'Unknown'}
             </p>
           </div>
-          <StatusBadge status={viewer.status} />
+          <div className="flex items-center mt-1">
+            <div className={`w-2 h-2 rounded-full ${getStatusColor(viewer.status)}`}></div>
+            <span className="ml-2 text-sm text-gray-300">{formatStatus(viewer.status)}</span>
+            
+            {/* Add resource indicator for running viewers */}
+            {viewer.status === 'running' && resources && (
+              <div className="flex items-center ml-3">
+                <div className={`w-2 h-2 rounded-full ${getResourceStatusColor()}`}></div>
+                <span className="ml-1 text-xs text-gray-400">
+                  {`${Math.round(resources.cpu || 0)}% CPU`}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
         
         <div className="mt-4">

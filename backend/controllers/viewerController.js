@@ -8,6 +8,7 @@ const logger = require('../utils/logger');
 const config = require('../config/config');
 const path = require('path');
 const fs = require('fs');
+const resourceMonitorService = require('../services/resourceMonitorService');
 
 // Get all viewers
 exports.getAllViewers = async (req, res) => {
@@ -169,6 +170,9 @@ exports.stopViewer = async (req, res) => {
         logger.error(`Failed to stop viewer ${viewer.name}: ${error.message}`);
       });
     
+    // Stop resource monitoring
+    resourceMonitorService.stopViewerMonitoring(viewer._id);
+    
     // Return immediate response
     res.status(200).json({ message: 'Viewer stopping', viewer });
   } catch (error) {
@@ -282,5 +286,66 @@ exports.serveScreenshot = async (req, res) => {
   } catch (error) {
     logger.error(`Error serving screenshot: ${error.message}`);
     res.status(500).json({ message: 'Error serving screenshot', error: error.message });
+  }
+};
+
+// Get viewer resource usage
+exports.getViewerResourceUsage = async (req, res) => {
+  try {
+    const viewerId = req.params.id;
+    
+    // Check if viewer exists
+    const viewer = await Viewer.findById(viewerId);
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    // Get resource usage
+    const resourceUsage = await resourceMonitorService.getViewerResourceUsage(viewerId);
+    
+    res.status(200).json(resourceUsage);
+  } catch (error) {
+    logger.error(`Error getting viewer resource usage: ${error.message}`);
+    res.status(500).json({ message: 'Error getting viewer resource usage', error: error.message });
+  }
+};
+
+// Update viewer resource limits
+exports.updateViewerResourceLimits = async (req, res) => {
+  try {
+    const viewerId = req.params.id;
+    const { cpuLimit, memoryLimit, networkLimit } = req.body;
+    
+    // Check if viewer exists
+    const viewer = await Viewer.findById(viewerId);
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    // Validate limits
+    if (cpuLimit !== undefined && (isNaN(cpuLimit) || cpuLimit <= 0 || cpuLimit > 100)) {
+      return res.status(400).json({ message: 'CPU limit must be a number between 1 and 100' });
+    }
+    
+    if (memoryLimit !== undefined && (isNaN(memoryLimit) || memoryLimit <= 0)) {
+      return res.status(400).json({ message: 'Memory limit must be a positive number' });
+    }
+    
+    if (networkLimit !== undefined && (isNaN(networkLimit) || networkLimit <= 0)) {
+      return res.status(400).json({ message: 'Network limit must be a positive number' });
+    }
+    
+    // Update resource limits
+    const limits = {};
+    if (cpuLimit !== undefined) limits.cpuLimit = cpuLimit;
+    if (memoryLimit !== undefined) limits.memoryLimit = memoryLimit;
+    if (networkLimit !== undefined) limits.networkLimit = networkLimit;
+    
+    const updatedLimits = await resourceMonitorService.updateViewerResourceLimits(viewerId, limits);
+    
+    res.status(200).json(updatedLimits);
+  } catch (error) {
+    logger.error(`Error updating viewer resource limits: ${error.message}`);
+    res.status(500).json({ message: 'Error updating viewer resource limits', error: error.message });
   }
 };

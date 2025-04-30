@@ -29,6 +29,11 @@ export const AppProvider = ({ children }) => {
   const [selectedBox, setSelectedBox] = useState(null);
   const [selectedViewer, setSelectedViewer] = useState(null);
   
+  // Resources state
+  const [boxResources, setBoxResources] = useState({});
+  const [viewerResources, setViewerResources] = useState({});
+  const [resourcesLoading, setResourcesLoading] = useState(false);
+  
   // Stats
   const [stats, setStats] = useState({
     totalBoxes: 0,
@@ -43,6 +48,7 @@ export const AppProvider = ({ children }) => {
   const initialFetchDone = useRef(false);
   const boxesInterval = useRef(null);
   const viewersInterval = useRef(null);
+  const resourcesInterval = useRef(null);
   
   // Update stats based on current data
   const updateStats = useCallback(() => {
@@ -450,6 +456,131 @@ export const AppProvider = ({ children }) => {
     }
   };
   
+  // Fetch box resource usage
+  const fetchBoxResources = useCallback(async (boxId) => {
+    try {
+      const response = await api.get(`/boxes/${boxId}/resources`);
+      setBoxResources(prevResources => ({
+        ...prevResources,
+        [boxId]: response.data
+      }));
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching resources for box ${boxId}:`, error);
+      return null;
+    }
+  }, []);
+  
+  // Fetch viewer resource usage
+  const fetchViewerResources = useCallback(async (viewerId) => {
+    try {
+      const response = await api.get(`/viewers/${viewerId}/resources`);
+      setViewerResources(prevResources => ({
+        ...prevResources,
+        [viewerId]: response.data
+      }));
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching resources for viewer ${viewerId}:`, error);
+      return null;
+    }
+  }, []);
+  
+  // Update box resource limits
+  const updateBoxResourceLimits = async (boxId, limits) => {
+    try {
+      const response = await api.put(`/boxes/${boxId}/resources/limits`, limits);
+      toast.success('Box resource limits updated');
+      
+      // Refresh resources data
+      fetchBoxResources(boxId);
+      
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating resource limits for box ${boxId}:`, error);
+      toast.error(error.response?.data?.message || 'Failed to update resource limits');
+      throw error;
+    }
+  };
+  
+  // Update viewer resource limits
+  const updateViewerResourceLimits = async (viewerId, limits) => {
+    try {
+      const response = await api.put(`/viewers/${viewerId}/resources/limits`, limits);
+      toast.success('Viewer resource limits updated');
+      
+      // Refresh resources data
+      fetchViewerResources(viewerId);
+      
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating resource limits for viewer ${viewerId}:`, error);
+      toast.error(error.response?.data?.message || 'Failed to update resource limits');
+      throw error;
+    }
+  };
+  
+  // Fetch resources for all active boxes and viewers
+  const fetchAllResources = useCallback(() => {
+    setResourcesLoading(true);
+    
+    try {
+      // Get active boxes
+      const activeBoxIds = boxes
+        .filter(box => box.status === 'running')
+        .map(box => box._id);
+      
+      // Get active viewers
+      const activeViewerIds = viewers
+        .filter(viewer => viewer.status === 'running')
+        .map(viewer => viewer._id);
+      
+      // Fetch box resources
+      const boxPromises = activeBoxIds.map(id => 
+        fetchBoxResources(id).catch(err => {
+          console.error(`Error fetching box ${id} resources: ${err.message}`);
+          return null;
+        })
+      );
+      
+      // Fetch viewer resources
+      const viewerPromises = activeViewerIds.map(id => 
+        fetchViewerResources(id).catch(err => {
+          console.error(`Error fetching viewer ${id} resources: ${err.message}`);
+          return null;
+        })
+      );
+      
+      // Wait for all requests to complete
+      Promise.all([...boxPromises, ...viewerPromises])
+        .catch(err => console.error(`Error in resource fetch promises: ${err.message}`))
+        .finally(() => {
+          setResourcesLoading(false);
+        });
+    } catch (error) {
+      console.error(`Error in fetchAllResources: ${error.message}`);
+      setResourcesLoading(false);
+    }
+  }, [boxes, viewers, fetchBoxResources, fetchViewerResources]);
+  
+  // Set up resource monitoring polling
+  useEffect(() => {
+    if (!initialFetchDone.current) return;
+    
+    // Set up resource polling (every 10 seconds)
+    if (!resourcesInterval.current) {
+      fetchAllResources(); // Initial fetch
+      resourcesInterval.current = setInterval(fetchAllResources, 10000);
+    }
+    
+    return () => {
+      if (resourcesInterval.current) {
+        clearInterval(resourcesInterval.current);
+        resourcesInterval.current = null;
+      }
+    };
+  }, [fetchAllResources, initialFetchDone.current]);
+  
   // Context value
   const contextValue = {
     // Data
@@ -469,6 +600,15 @@ export const AppProvider = ({ children }) => {
     boxesError,
     viewersError,
     vpnError,
+    
+    // Resource monitoring
+    boxResources,
+    viewerResources,
+    resourcesLoading,
+    fetchBoxResources,
+    fetchViewerResources,
+    updateBoxResourceLimits,
+    updateViewerResourceLimits,
     
     // Actions
     setSelectedBox,

@@ -16,6 +16,9 @@ const ViewerDetail = ({ viewerId }) => {
     updateViewer,
     takeViewerScreenshot,
     fetchViewerDetails,
+    viewerResources,
+    fetchViewerResources,
+    updateViewerResourceLimits,
   } = useAppContext();
   
   const [isLoading, setIsLoading] = useState(false);
@@ -26,6 +29,12 @@ const ViewerDetail = ({ viewerId }) => {
   const [viewerLogs, setViewerLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logsInterval, setLogsInterval] = useState(null);
+  const [isEditingLimits, setIsEditingLimits] = useState(false);
+  const [limits, setLimits] = useState({
+    cpuLimit: 100,
+    memoryLimit: 500,
+    networkLimit: 5
+  });
   
   const navigate = useNavigate();
   
@@ -469,61 +478,301 @@ const ViewerDetail = ({ viewerId }) => {
           )}
         </Card>
         
-        {/* Logs */}
-        <Card title="Logs" className="md:col-span-2">
-          {isLoadingLogs ? (
-            <div className="flex justify-center items-center py-8">
-              <Spinner size="md" />
-            </div>
-          ) : viewerLogs && viewerLogs.length > 0 ? (
-            <div className="overflow-auto max-h-96">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      Time
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      Level
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      Message
-                    </th>
+        {/* Resource Monitor */}
+        {selectedViewer.status === 'running' && (
+          <ResourceMonitor viewerId={selectedViewer._id} />
+        )}
+      </div>
+      
+      {/* Logs */}
+      <Card title="Logs" className="md:col-span-2">
+        {isLoadingLogs ? (
+          <div className="flex justify-center items-center py-8">
+            <Spinner size="md" />
+          </div>
+        ) : viewerLogs && viewerLogs.length > 0 ? (
+          <div className="overflow-auto max-h-96">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Time
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Level
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Message
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {viewerLogs.map((log, index) => (
+                  <tr key={index}>
+                    <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </td>
+                    <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
+                      {log.level || 'info'}
+                    </td>
+                    <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
+                      {log.message}
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {viewerLogs.map((log, index) => (
-                    <tr key={index}>
-                      <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </td>
-                      <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
-                        {log.level || 'info'}
-                      </td>
-                      <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
-                        {log.message}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-6 text-gray-500">
+            No logs available
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+const ResourceMonitor = ({ viewerId }) => {
+  const { viewerResources, fetchViewerResources, updateViewerResourceLimits } = useAppContext();
+  const [isEditingLimits, setIsEditingLimits] = useState(false);
+  const [limits, setLimits] = useState({
+    cpuLimit: 100,
+    memoryLimit: 500,
+    networkLimit: 5
+  });
+  
+  const resources = viewerResources[viewerId] || {
+    cpu: 0,
+    memory: 0,
+    networkRx: 0,
+    networkTx: 0,
+    lastUpdated: null,
+    resourceLimits: {
+      cpuLimit: 100,
+      memoryLimit: 500,
+      networkLimit: 5
+    }
+  };
+  
+  useEffect(() => {
+    // Initial fetch
+    fetchViewerResources(viewerId).catch(err => 
+      console.error(`Error fetching viewer resources: ${err.message}`)
+    );
+    
+    // Set up polling interval (every 5 seconds)
+    const interval = setInterval(() => {
+      fetchViewerResources(viewerId).catch(err => 
+        console.error(`Error fetching viewer resources in interval: ${err.message}`)
+      );
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [viewerId, fetchViewerResources]);
+  
+  // Update limits from resources when available
+  useEffect(() => {
+    if (resources && resources.resourceLimits) {
+      setLimits({
+        cpuLimit: resources.resourceLimits.cpuLimit || 100,
+        memoryLimit: resources.resourceLimits.memoryLimit || 500,
+        networkLimit: resources.resourceLimits.networkLimit || 5
+      });
+    }
+  }, [resources]);
+  
+  const handleLimitChange = (e) => {
+    const { name, value } = e.target;
+    setLimits(prev => ({
+      ...prev,
+      [name]: Number(value)
+    }));
+  };
+  
+  const handleSaveLimits = async () => {
+    try {
+      await updateViewerResourceLimits(viewerId, limits);
+      setIsEditingLimits(false);
+    } catch (error) {
+      console.error('Error saving resource limits:', error);
+    }
+  };
+  
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return 'Never';
+    return new Date(timestamp).toLocaleString();
+  };
+  
+  if (!resources) {
+    return (
+      <div className="bg-gray-800 rounded-lg p-4 mt-4">
+        <h3 className="text-xl font-semibold mb-4">Resource Monitor</h3>
+        <div className="text-gray-400">Loading resource data...</div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="bg-gray-800 rounded-lg p-4 mt-4">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-semibold">Resource Monitor</h3>
+        <div className="flex space-x-2">
+          <button
+            onClick={() => fetchViewerResources(viewerId)}
+            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded-md text-sm"
+            title="Refresh resource data"
+          >
+            <i className="fas fa-sync-alt"></i>
+          </button>
+          {isEditingLimits ? (
+            <button
+              onClick={handleSaveLimits}
+              className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded-md text-sm"
+            >
+              Save Limits
+            </button>
           ) : (
-            <div className="text-center py-6 text-gray-500">
-              No logs available
+            <button
+              onClick={() => setIsEditingLimits(true)}
+              className="px-3 py-1 bg-gray-600 hover:bg-gray-700 rounded-md text-sm"
+            >
+              Edit Limits
+            </button>
+          )}
+        </div>
+      </div>
+      
+      <div className="text-sm text-gray-400 mb-2">
+        Last updated: {formatTimestamp(resources.lastUpdated)}
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {/* CPU Usage */}
+        <div className="bg-gray-700 p-3 rounded-md">
+          <div className="flex justify-between mb-1">
+            <span>CPU Usage</span>
+            <span>{resources.cpu}%</span>
+          </div>
+          <div className="w-full bg-gray-600 rounded-full h-2.5">
+            <div 
+              className={`h-2.5 rounded-full ${
+                resources.cpu > 80 ? 'bg-red-600' : 
+                resources.cpu > 60 ? 'bg-yellow-500' : 'bg-green-500'
+              }`}
+              style={{ width: `${Math.min(resources.cpu, 100)}%` }}
+            ></div>
+          </div>
+          {isEditingLimits && (
+            <div className="mt-2">
+              <label className="text-xs text-gray-400">CPU Limit (%)</label>
+              <input
+                type="number"
+                name="cpuLimit"
+                value={limits.cpuLimit}
+                onChange={handleLimitChange}
+                min="1"
+                max="100"
+                className="w-full bg-gray-800 text-white border border-gray-600 rounded p-1 text-sm"
+              />
             </div>
           )}
-        </Card>
+        </div>
+        
+        {/* Memory Usage */}
+        <div className="bg-gray-700 p-3 rounded-md">
+          <div className="flex justify-between mb-1">
+            <span>Memory Usage</span>
+            <span>{resources.memory} MB</span>
+          </div>
+          <div className="w-full bg-gray-600 rounded-full h-2.5">
+            <div 
+              className={`h-2.5 rounded-full ${
+                resources.memory > limits.memoryLimit * 0.8 ? 'bg-red-600' : 
+                resources.memory > limits.memoryLimit * 0.6 ? 'bg-yellow-500' : 'bg-green-500'
+              }`}
+              style={{ width: `${Math.min((resources.memory / limits.memoryLimit) * 100, 100)}%` }}
+            ></div>
+          </div>
+          {isEditingLimits && (
+            <div className="mt-2">
+              <label className="text-xs text-gray-400">Memory Limit (MB)</label>
+              <input
+                type="number"
+                name="memoryLimit"
+                value={limits.memoryLimit}
+                onChange={handleLimitChange}
+                min="100"
+                className="w-full bg-gray-800 text-white border border-gray-600 rounded p-1 text-sm"
+              />
+            </div>
+          )}
+        </div>
+        
+        {/* Network Usage */}
+        <div className="bg-gray-700 p-3 rounded-md">
+          <div className="flex justify-between mb-1">
+            <span>Network Download</span>
+            <span>{resources.networkRx.toFixed(2)} Mbps</span>
+          </div>
+          <div className="w-full bg-gray-600 rounded-full h-2.5">
+            <div 
+              className="h-2.5 rounded-full bg-blue-500"
+              style={{ width: `${Math.min((resources.networkRx / limits.networkLimit) * 100, 100)}%` }}
+            ></div>
+          </div>
+        </div>
+        
+        {/* Network Upload */}
+        <div className="bg-gray-700 p-3 rounded-md">
+          <div className="flex justify-between mb-1">
+            <span>Network Upload</span>
+            <span>{resources.networkTx.toFixed(2)} Mbps</span>
+          </div>
+          <div className="w-full bg-gray-600 rounded-full h-2.5">
+            <div 
+              className="h-2.5 rounded-full bg-purple-500"
+              style={{ width: `${Math.min((resources.networkTx / limits.networkLimit) * 100, 100)}%` }}
+            ></div>
+          </div>
+          
+          {isEditingLimits && (
+            <div className="mt-2">
+              <label className="text-xs text-gray-400">Network Limit (Mbps)</label>
+              <input
+                type="number"
+                name="networkLimit"
+                value={limits.networkLimit}
+                onChange={handleLimitChange}
+                min="1"
+                className="w-full bg-gray-800 text-white border border-gray-600 rounded p-1 text-sm"
+              />
+            </div>
+          )}
+        </div>
       </div>
+      
+      {/* Resource Status and Messages */}
+      {(resources.cpu > limits.cpuLimit || 
+        resources.memory > limits.memoryLimit || 
+        (resources.networkRx + resources.networkTx) > limits.networkLimit) && (
+        <div className="bg-red-900/30 border border-red-800 text-red-200 p-3 rounded-md mt-2">
+          <p className="font-semibold">⚠️ Resource limits exceeded</p>
+          <p className="text-sm mt-1">
+            One or more resource limits are currently being exceeded. The system may automatically
+            restart the viewer if resource usage remains high.
+          </p>
+        </div>
+      )}
     </div>
   );
 };
