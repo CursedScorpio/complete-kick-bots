@@ -3,6 +3,7 @@ import React from 'react';
 import DashboardStats from '../components/Dashboard/DashboardStats';
 import StreamMonitor from '../components/Dashboard/StreamMonitor';
 import ChatMonitor from '../components/Dashboard/ChatMonitor';
+import SystemResources from '../components/Dashboard/SystemResources';
 
 const Dashboard = () => {
   return (
@@ -16,6 +17,9 @@ const Dashboard = () => {
       
       {/* Stats Cards */}
       <DashboardStats />
+      
+      {/* System Resources */}
+      <SystemResources />
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Stream Monitor */}

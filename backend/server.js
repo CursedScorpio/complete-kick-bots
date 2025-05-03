@@ -13,6 +13,10 @@ const boxRoutes = require('./routes/boxRoutes');
 const viewerRoutes = require('./routes/viewerRoutes');
 const vpnRoutes = require('./routes/vpnRoutes');
 const streamRoutes = require('./routes/streamRoutes');
+const systemRoutes = require('./routes/systemRoutes');
+
+// Import utilities
+const resourceManager = require('./utils/resourceManager');
 
 // Load environment variables
 dotenv.config();
@@ -37,11 +41,7 @@ app.use('/api/boxes', boxRoutes);
 app.use('/api/viewers', viewerRoutes);
 app.use('/api/vpn', vpnRoutes);
 app.use('/api/streams', streamRoutes);
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date() });
-});
+app.use('/api/system', systemRoutes);
 
 // Serve frontend in production
 if (process.env.NODE_ENV === 'production') {
@@ -73,6 +73,12 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kick-view
 })
   .then(() => {
     logger.info('Connected to MongoDB');
+    
+    // Initialize resource manager
+    resourceManager.init({
+      debug: process.env.NODE_ENV !== 'production'
+    });
+    logger.info('Resource Manager initialized');
     
     // Start the server
     app.listen(PORT, () => {

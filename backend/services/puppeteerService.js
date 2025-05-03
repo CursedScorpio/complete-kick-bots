@@ -3151,7 +3151,17 @@ exports.forceAllViewersLowestQuality = async () => {
   return results;
 };
 
+/**
+ * Get all active browser instances for resource management
+ * @returns {Map} Map of browser instances keyed by viewer ID
+ */
+function getBrowserInstances() {
+  return browserInstances;
+}
+
 module.exports = {
+  getBrowserInstances,
+  
   startViewer: exports.startViewer,
   navigateToStream: exports.navigateToStream,
   stopViewer: exports.stopViewer,
