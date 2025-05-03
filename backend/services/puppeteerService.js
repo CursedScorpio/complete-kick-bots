@@ -2909,12 +2909,256 @@ exports.forceRefreshKickStream = async (viewerId) => {
 };
 
 // Export helper functions and interval management
+/**
+ * Force Kick.com stream to use lowest quality (160p)
+ * @param {string} viewerId - ID of the viewer
+ * @returns {Promise<boolean>} - Success status
+ */
+exports.forceLowestQuality = async (viewerId) => {
+  const viewer = await Viewer.findById(viewerId);
+  
+  if (!viewer) {
+    throw new Error('Viewer not found');
+  }
+  
+  if (viewer.status !== 'running') {
+    throw new Error('Viewer is not running');
+  }
+  
+  if (!browserInstances.has(viewerId.toString())) {
+    throw new Error('Browser instance not found');
+  }
+  
+  logger.info(`Setting lowest quality (160p) for viewer ${viewer.name}`);
+  
+  try {
+    const { page } = browserInstances.get(viewerId.toString());
+    
+    // Execute quality change in the browser context
+    const qualityChanged = await page.evaluate(() => {
+      try {
+        // Function to create touch events (important for mobile)
+        function createAndDispatchTouchEvent(element, eventType) {
+          if (!element) return false;
+          
+          const rect = element.getBoundingClientRect();
+          const touchObj = new Touch({
+            identifier: Date.now(),
+            target: element,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+            pageX: rect.left + rect.width / 2,
+            pageY: rect.top + rect.height / 2,
+            screenX: rect.left + rect.width / 2,
+            screenY: rect.top + rect.height / 2,
+            radiusX: 2.5,
+            radiusY: 2.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          
+          const touchEvent = new TouchEvent(eventType, {
+            cancelable: true,
+            bubbles: true,
+            touches: (eventType === 'touchend') ? [] : [touchObj],
+            targetTouches: (eventType === 'touchend') ? [] : [touchObj],
+            changedTouches: [touchObj]
+          });
+          
+          element.dispatchEvent(touchEvent);
+          return true;
+        }
+        
+        // Step 1: Find and click on the settings/gear icon
+        console.log("Looking for settings button...");
+        
+        // First, make sure the player controls are visible by interacting with the player
+        const player = document.querySelector('#video-player') || document.querySelector('video');
+        if (player) {
+          createAndDispatchTouchEvent(player, 'touchstart');
+          setTimeout(() => createAndDispatchTouchEvent(player, 'touchend'), 100);
+          console.log("Touched player to show controls");
+        }
+        
+        // Wait a moment for controls to appear
+        setTimeout(() => {
+          // Look for settings/gear button
+          const settingsSelectors = [
+            // Common selectors for settings icons
+            '[aria-label="Settings"]',
+            'button[class*="settings"]',
+            'button[class*="gear"]',
+            'button[class*="cog"]',
+            '.settings-button',
+            '.vjs-settings-button',
+            '.player-settings-button',
+            // More generic selectors
+            'button svg[class*="settings"]',
+            'button svg[class*="gear"]',
+            'button svg[class*="cog"]'
+          ];
+          
+          let settingsButton = null;
+          for (const selector of settingsSelectors) {
+            const buttons = document.querySelectorAll(selector);
+            for (const button of buttons) {
+              if (button.offsetParent !== null) { // Check if visible
+                settingsButton = button;
+                break;
+              }
+            }
+            if (settingsButton) break;
+          }
+          
+          if (!settingsButton) {
+            console.log("Settings button not found");
+            return false;
+          }
+          
+          console.log("Settings button found, clicking it");
+          createAndDispatchTouchEvent(settingsButton, 'touchstart');
+          setTimeout(() => createAndDispatchTouchEvent(settingsButton, 'touchend'), 100);
+          
+          // Step 2: After the settings menu opens, find the quality option
+          setTimeout(() => {
+            // Look for the 160p option using the exact HTML structure provided
+            console.log("Looking for 160p option...");
+            
+            // Use the exact selector for the 160p option
+            const qualityOptionSelector = 'div[role="menuitemradio"][data-state="unchecked"][data-orientation="vertical"]:contains("160p")';
+            
+            // If querySelector doesn't support :contains, try these alternatives
+            const qualityOptions = [
+              // Exact selector based on the HTML provided
+              'div[role="menuitemradio"][data-orientation="vertical"]',
+              // Broader selectors that might match
+              '[role="menuitemradio"]',
+              '[data-state="unchecked"]',
+              '[data-orientation="vertical"]',
+              // Classes used in the provided HTML
+              '.relative.flex.h-\\[30px\\].cursor-pointer.select-none.items-center',
+              // Any menu item that contains 160p
+              '*:not([style*="display: none"]):contains("160p")'
+            ];
+            
+            let qualityOption = null;
+            
+            for (const selector of qualityOptions) {
+              const options = document.querySelectorAll(selector);
+              
+              for (const option of options) {
+                if (option.offsetParent === null) continue; // Skip if not visible
+                
+                const text = option.innerText || option.textContent || "";
+                if (text.trim() === "160p") {
+                  qualityOption = option;
+                  break;
+                }
+              }
+              
+              if (qualityOption) break;
+            }
+            
+            if (!qualityOption) {
+              console.log("160p quality option not found");
+              return false;
+            }
+            
+            console.log("160p quality option found, clicking it");
+            createAndDispatchTouchEvent(qualityOption, 'touchstart');
+            setTimeout(() => createAndDispatchTouchEvent(qualityOption, 'touchend'), 100);
+            
+            return true;
+          }, 500); // Wait for quality menu to appear
+        }, 500); // Wait for player controls to show
+        
+        return true;
+      } catch (error) {
+        console.error("Error setting quality to 160p:", error);
+        return false;
+      }
+    });
+    
+    // Update viewer with quality change attempt
+    viewer.lastActivityAt = new Date();
+    viewer.logs.push({
+      level: 'info',
+      message: `Attempted to set quality to 160p: ${qualityChanged ? 'Success' : 'Failed'}`
+    });
+    
+    // If too many logs, remove oldest
+    if (viewer.logs.length > 100) {
+      viewer.logs = viewer.logs.slice(-100);
+    }
+    
+    await saveViewerWithLock(viewer);
+    
+    // Take a screenshot to confirm
+    try {
+      await exports.takeScreenshot(viewerId);
+    } catch (error) {
+      logger.debug(`Failed to take post-quality-change screenshot: ${error.message}`);
+    }
+    
+    return true;
+  } catch (error) {
+    logger.error(`Error setting lowest quality for viewer ${viewer.name}: ${error.message}`);
+    throw error;
+  }
+};
+
+/**
+ * Force all running viewers to use lowest quality (160p)
+ * @returns {Promise<{success: boolean, total: number, successful: number, failed: number, errors: Array}>} - Operation results
+ */
+exports.forceAllViewersLowestQuality = async () => {
+  const viewers = await Viewer.find({ status: 'running' });
+  const results = {
+    success: true,
+    total: viewers.length,
+    successful: 0,
+    failed: 0,
+    errors: []
+  };
+  
+  logger.info(`Attempting to set lowest quality (160p) for ${viewers.length} viewers`);
+  
+  for (const viewer of viewers) {
+    try {
+      await exports.forceLowestQuality(viewer._id);
+      results.successful++;
+      
+      // Add a small delay between operations to avoid overloading
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      logger.error(`Failed to set lowest quality for viewer ${viewer.name}: ${error.message}`);
+      results.failed++;
+      results.errors.push({
+        viewerId: viewer._id,
+        viewerName: viewer.name,
+        error: error.message
+      });
+    }
+  }
+  
+  // Mark overall success as false if any operations failed
+  if (results.failed > 0) {
+    results.success = false;
+  }
+  
+  logger.info(`Lowest quality set results: ${results.successful} successful, ${results.failed} failed`);
+  
+  return results;
+};
+
 module.exports = {
   startViewer: exports.startViewer,
   navigateToStream: exports.navigateToStream,
   stopViewer: exports.stopViewer,
   takeScreenshot: exports.takeScreenshot,
   forceRefreshKickStream: exports.forceRefreshKickStream,
+  forceLowestQuality: exports.forceLowestQuality,
+  forceAllViewersLowestQuality: exports.forceAllViewersLowestQuality,
   saveViewerWithLock,
   startUpdateInterval,
   clearUpdateInterval,

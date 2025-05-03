@@ -27,4 +27,10 @@ router.get('/:id/logs', viewerController.getViewerLogs);
 // Serve screenshot image
 router.get('/screenshots/:filename', viewerController.serveScreenshot);
 
+// Force lowest quality (160p)
+router.post('/:id/force-lowest-quality', viewerController.forceLowestQuality);
+
+// Force lowest quality (160p) for all viewers
+router.post('/force-all-lowest-quality', viewerController.forceAllViewersLowestQuality);
+
 module.exports = router;

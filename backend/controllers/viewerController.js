@@ -284,3 +284,46 @@ exports.serveScreenshot = async (req, res) => {
     res.status(500).json({ message: 'Error serving screenshot', error: error.message });
   }
 };
+
+// Force lowest quality (160p) for a viewer
+exports.forceLowestQuality = async (req, res) => {
+  try {
+    const viewer = await Viewer.findById(req.params.id);
+    
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    if (viewer.status !== 'running') {
+      return res.status(400).json({ message: 'Viewer is not running' });
+    }
+    
+    await puppeteerService.forceLowestQuality(req.params.id);
+    
+    res.status(200).json({ 
+      message: `Successfully set lowest quality (160p) for viewer ${viewer.name}`,
+      success: true
+    });
+  } catch (error) {
+    logger.error(`Error setting lowest quality: ${error.message}`);
+    res.status(500).json({ message: 'Error setting lowest quality', error: error.message });
+  }
+};
+
+// Force lowest quality (160p) for all running viewers
+exports.forceAllViewersLowestQuality = async (req, res) => {
+  try {
+    const results = await puppeteerService.forceAllViewersLowestQuality();
+    
+    res.status(200).json({
+      message: `Operation completed: ${results.successful} viewers set to lowest quality, ${results.failed} failed`,
+      ...results
+    });
+  } catch (error) {
+    logger.error(`Error setting lowest quality for all viewers: ${error.message}`);
+    res.status(500).json({ 
+      message: 'Error setting lowest quality for all viewers', 
+      error: error.message 
+    });
+  }
+};
