@@ -164,6 +164,36 @@ async function handleKickPageBarriers(page) {
     // Wait for page to load enough to find common barriers
     await page.waitForTimeout(2000);
     
+    // Add cookie consent banner fix
+    await page.evaluate(() => {
+      try {
+        // Target the exact cookie accept button from the HTML
+        const acceptButton = Array.from(document.querySelectorAll('button'))
+          .find(button => 
+            button.textContent.trim() === 'Accept' && 
+            button.closest('div[class*="cookie"], div[class*="bg-shade-lower"]')
+          );
+        
+        if (acceptButton) {
+          console.log("Found cookie accept button, clicking it");
+          acceptButton.click();
+          return true;
+        }
+        
+        // Alternative approach - set cookies directly
+        document.cookie = "cookieConsent=accepted; max-age=31536000; path=/";
+        document.cookie = "gdpr-consent=accepted; max-age=31536000; path=/";
+        
+        // Try to hide the banner if click didn't work
+        const cookieBanner = document.querySelector('div.bg-shade-lower.flex.w-full.flex-col');
+        if (cookieBanner) {
+          cookieBanner.style.display = 'none';
+        }
+      } catch (e) {
+        console.error("Error handling cookie banner:", e);
+      }
+    });
+    
     // Block problematic scripts that cause CORS errors
     await page.evaluateOnNewDocument(() => {
       // Block scripts from problematic domains

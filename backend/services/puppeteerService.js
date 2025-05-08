@@ -1088,156 +1088,117 @@ async function forceLowestQuality(viewerId) {
   try {
     const { page } = browserInstances.get(viewerId.toString());
     
-    // Execute quality change in the browser context
-    const qualityChanged = await page.evaluate(() => {
-      try {
-        // Function to create touch events (important for mobile)
-        function createAndDispatchTouchEvent(element, eventType) {
-          if (!element) return false;
-          
-          const rect = element.getBoundingClientRect();
-          const touchObj = new Touch({
-            identifier: Date.now(),
-            target: element,
-            clientX: rect.left + rect.width / 2,
-            clientY: rect.top + rect.height / 2,
-            pageX: rect.left + rect.width / 2,
-            pageY: rect.top + rect.height / 2,
-            screenX: rect.left + rect.width / 2,
-            screenY: rect.top + rect.height / 2,
-            radiusX: 2.5,
-            radiusY: 2.5,
-            rotationAngle: 0,
-            force: 1
-          });
-          
-          const touchEvent = new TouchEvent(eventType, {
-            cancelable: true,
-            bubbles: true,
-            touches: (eventType === 'touchend') ? [] : [touchObj],
-            targetTouches: (eventType === 'touchend') ? [] : [touchObj],
-            changedTouches: [touchObj]
-          });
-          
-          element.dispatchEvent(touchEvent);
-          return true;
-        }
-        
-        // Step 1: Find and click on the settings/gear icon
-        console.log("Looking for settings button...");
-        
-        // First, make sure the player controls are visible by interacting with the player
-        const player = document.querySelector('#video-player') || document.querySelector('video');
-        if (player) {
-          createAndDispatchTouchEvent(player, 'touchstart');
-          setTimeout(() => createAndDispatchTouchEvent(player, 'touchend'), 100);
-          console.log("Touched player to show controls");
-        }
-        
-        // Wait a moment for controls to appear
-        setTimeout(() => {
-          // Look for settings/gear button
-          const settingsSelectors = [
-            // Common selectors for settings icons
-            '[aria-label="Settings"]',
-            'button[class*="settings"]',
-            'button[class*="gear"]',
-            'button[class*="cog"]',
-            '.settings-button',
-            '.vjs-settings-button',
-            '.player-settings-button',
-            // More generic selectors
-            'button svg[class*="settings"]',
-            'button svg[class*="gear"]',
-            'button svg[class*="cog"]'
-          ];
-          
-          let settingsButton = null;
-          for (const selector of settingsSelectors) {
-            const buttons = document.querySelectorAll(selector);
-            for (const button of buttons) {
-              if (button.offsetParent !== null) { // Check if visible
-                settingsButton = button;
-                break;
-              }
-            }
-            if (settingsButton) break;
-          }
-          
-          if (!settingsButton) {
-            console.log("Settings button not found");
-            return false;
-          }
-          
-          console.log("Settings button found, clicking it");
-          createAndDispatchTouchEvent(settingsButton, 'touchstart');
-          setTimeout(() => createAndDispatchTouchEvent(settingsButton, 'touchend'), 100);
-          
-          // Step 2: After the settings menu opens, find the quality option
-          setTimeout(() => {
-            // Look for the 160p option using the exact HTML structure provided
-            console.log("Looking for 160p option...");
-            
-            // Use the exact selector for the 160p option
-            const qualityOptionSelector = 'div[role="menuitemradio"][data-state="unchecked"][data-orientation="vertical"]:contains("160p")';
-            
-            // If querySelector doesn't support :contains, try these alternatives
-            const qualityOptions = [
-              // Exact selector based on the HTML provided
-              'div[role="menuitemradio"][data-orientation="vertical"]',
-              // Broader selectors that might match
-              '[role="menuitemradio"]',
-              '[data-state="unchecked"]',
-              '[data-orientation="vertical"]',
-              // Classes used in the provided HTML
-              '.relative.flex.h-\\[30px\\].cursor-pointer.select-none.items-center',
-              // Any menu item that contains 160p
-              '*:not([style*="display: none"]):contains("160p")'
-            ];
-            
-            let qualityOption = null;
-            
-            for (const selector of qualityOptions) {
-              const options = document.querySelectorAll(selector);
-              
-              for (const option of options) {
-                if (option.offsetParent === null) continue; // Skip if not visible
-                
-                const text = option.innerText || option.textContent || "";
-                if (text.trim() === "160p") {
-                  qualityOption = option;
-                  break;
-                }
-              }
-              
-              if (qualityOption) break;
-            }
-            
-            if (!qualityOption) {
-              console.log("160p quality option not found");
-              return false;
-            }
-            
-            console.log("160p quality option found, clicking it");
-            createAndDispatchTouchEvent(qualityOption, 'touchstart');
-            setTimeout(() => createAndDispatchTouchEvent(qualityOption, 'touchend'), 100);
-            
-            return true;
-          }, 500); // Wait for quality menu to appear
-        }, 500); // Wait for player controls to show
-        
+    // First, ensure control overlay is visible by clicking on video
+    await page.evaluate(() => {
+      const video = document.querySelector('#video-player') || document.querySelector('video');
+      if (video) {
+        video.click();
+        console.log("Clicked on video to show controls");
+      }
+    });
+    
+    // Wait for controls to appear
+    await page.waitForTimeout(1000);
+    
+    // Log all visible buttons for debugging
+    const buttonsInfo = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      return buttons.map(btn => ({
+        svg: btn.querySelector('svg') ? true : false,
+        path: btn.querySelector('svg path') ? btn.querySelector('svg path').getAttribute('d') : null,
+        classes: btn.className,
+        visible: btn.offsetParent !== null
+      }));
+    });
+    console.log("Buttons found:", JSON.stringify(buttonsInfo));
+    
+    // Click on the settings button - using the specific SVG path pattern
+    const clicked = await page.evaluate(() => {
+      // Find the settings button with the specific gear icon SVG path 
+      // This matches the gear icon in your HTML
+      const settingsButton = Array.from(document.querySelectorAll('button')).find(btn => {
+        const svg = btn.querySelector('svg');
+        const path = svg && svg.querySelector('path');
+        return path && path.getAttribute('d').includes('M16,20.9c-2.7,0-4.9-2.2-4.9-4.9s2.2-4.9,4.9-4.9');
+      });
+      
+      if (settingsButton) {
+        console.log("Found settings button, clicking it");
+        settingsButton.click();
         return true;
-      } catch (error) {
-        console.error("Error setting quality to 160p:", error);
+      } else {
+        console.error("Settings button with gear icon not found");
+        
+        // Try alternative approach - any button in the controls area that might be settings
+        const controlsArea = document.querySelector('.z-controls');
+        if (controlsArea) {
+          const lastButton = controlsArea.querySelectorAll('button')[controlsArea.querySelectorAll('button').length - 1];
+          if (lastButton) {
+            console.log("Trying last button in controls area");
+            lastButton.click();
+            return true;
+          }
+        }
         return false;
       }
+    });
+    
+    if (!clicked) {
+      logger.warn('Could not find settings button');
+    }
+    
+    // Wait for quality menu to appear
+    await page.waitForTimeout(2000);
+    
+    // Now click the 160p option
+    const qualityChanged = await page.evaluate(() => {
+      // Look for the exact 160p button structure from your HTML
+      const option160p = document.querySelector('[role="radio"][value="160p"], #160p');
+      
+      if (option160p) {
+        console.log("Found 160p option, clicking it");
+        option160p.click();
+        return true;
+      }
+      
+      // Alternative: Look for any quality option with "160p" text
+      const allQualityOptions = Array.from(document.querySelectorAll('[role="radio"], [role="menuitemradio"]'));
+      console.log(`Found ${allQualityOptions.length} quality options`);
+      
+      const option160Text = allQualityOptions.find(opt => 
+        opt.textContent.includes('160p') || 
+        opt.nextElementSibling?.textContent.includes('160p')
+      );
+      
+      if (option160Text) {
+        console.log("Found 160p text option, clicking it");
+        option160Text.click();
+        return true;
+      }
+      
+      // Last attempt - find anything with 160p label
+      const qualityLabels = Array.from(document.querySelectorAll('label'));
+      const label160p = qualityLabels.find(label => label.textContent.includes('160p'));
+      
+      if (label160p) {
+        console.log("Found 160p label, clicking preceding button");
+        const buttonFor160p = label160p.previousElementSibling;
+        if (buttonFor160p) {
+          buttonFor160p.click();
+          return true;
+        }
+      }
+      
+      console.error("Could not find 160p quality option");
+      return false;
     });
     
     // Update viewer with quality change attempt
     viewer.lastActivityAt = new Date();
     viewer.logs.push({
       level: 'info',
-      message: `Attempted to set quality to 160p: ${qualityChanged ? 'Success' : 'Failed'}`
+      message: `Attempted to set quality to 160p: ${qualityChanged ? 'Success' : 'Failed'}`,
+      details: clicked ? 'Settings button clicked' : 'Settings button not found'
     });
     
     // If too many logs, remove oldest
