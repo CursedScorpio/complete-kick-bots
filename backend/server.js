@@ -43,6 +43,11 @@ app.use('/api/vpn', vpnRoutes);
 app.use('/api/streams', streamRoutes);
 app.use('/api/system', systemRoutes);
 
+// Direct health check route for Docker
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Serve frontend in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../frontend/build')));
