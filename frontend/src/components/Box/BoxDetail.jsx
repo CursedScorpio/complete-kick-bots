@@ -338,6 +338,9 @@ const BoxDetail = ({ boxId }) => {
                   <span className="text-gray-500"> active out of </span>
                   <span className="font-medium">{totalViewersCount}</span>
                   <span className="text-gray-500"> total</span>
+                  <span className="text-gray-500"> (configured for </span>
+                  <span className="font-medium">{selectedBox.viewersPerBox || 10}</span>
+                  <span className="text-gray-500"> viewers)</span>
                 </div>
               </div>
               

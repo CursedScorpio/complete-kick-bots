@@ -13,6 +13,7 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
     name: '',
     vpnConfig: '',
     streamUrl: '',
+    viewersPerBox: 10,
   });
   
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -25,12 +26,14 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
         name: box.name || '',
         vpnConfig: box.vpnConfig || '',
         streamUrl: box.streamUrl || '',
+        viewersPerBox: box.viewersPerBox || 10,
       });
     } else {
       setFormData({
         name: '',
         vpnConfig: vpnConfigs[0]?.name || '',
         streamUrl: '',
+        viewersPerBox: 10,
       });
     }
   }, [isEdit, box, vpnConfigs]);
@@ -72,6 +75,12 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
     // Validate stream URL format if provided
     if (formData.streamUrl.trim() && !formData.streamUrl.match(/^https?:\/\/(www\.)?kick\.com\/[a-zA-Z0-9_-]+$/)) {
       newErrors.streamUrl = 'Invalid Kick.com URL (e.g., https://kick.com/streamername)';
+    }
+    
+    // Validate viewers per box
+    const viewersPerBox = parseInt(formData.viewersPerBox, 10);
+    if (isNaN(viewersPerBox) || viewersPerBox < 1 || viewersPerBox > 50) {
+      newErrors.viewersPerBox = 'Viewers per box must be between 1 and 50';
     }
     
     setErrors(newErrors);
@@ -231,12 +240,37 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
           </p>
         </div>
         
+        {/* Viewers Per Box Field */}
+        <div className="mb-4">
+          <label htmlFor="viewersPerBox" className="block text-sm font-medium text-gray-700">
+            Viewers Per Box
+          </label>
+          <input
+            type="number"
+            id="viewersPerBox"
+            name="viewersPerBox"
+            value={formData.viewersPerBox}
+            onChange={handleChange}
+            min="1"
+            max="50"
+            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
+              errors.viewersPerBox ? 'border-danger-300' : ''
+            }`}
+          />
+          {errors.viewersPerBox && (
+            <p className="mt-1 text-sm text-danger-600">{errors.viewersPerBox}</p>
+          )}
+          <p className="mt-1 text-xs text-gray-500">
+            Number of viewers to create when starting this box (between 1 and 50).
+          </p>
+        </div>
+        
         {/* Info Text */}
         <div className="mt-4 text-sm text-gray-500">
           <p>
             {isEdit
-              ? 'Update the box configuration. Note that you cannot change VPN configuration while the box is running.'
-              : 'Create a new box with the selected VPN configuration. Each box can host up to 10 viewers.'}
+              ? 'Update the box configuration. Note that you cannot change VPN configuration or viewers count while the box is running.'
+              : 'Create a new box with the selected VPN configuration and specified number of viewers.'}
           </p>
         </div>
       </form>

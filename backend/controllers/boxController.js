@@ -37,7 +37,7 @@ exports.getBoxById = async (req, res) => {
 // Create a new box
 exports.createBox = async (req, res) => {
   try {
-    const { name, vpnConfig, streamUrl } = req.body;
+    const { name, vpnConfig, streamUrl, viewersPerBox } = req.body;
     
     if (!name || !vpnConfig) {
       return res.status(400).json({ message: 'Name and VPN config are required' });
@@ -54,11 +54,18 @@ exports.createBox = async (req, res) => {
       return res.status(400).json({ message: 'Invalid Kick.com URL' });
     }
     
+    // Validate viewersPerBox if provided
+    const viewersCount = viewersPerBox ? parseInt(viewersPerBox, 10) : config.viewer.instancesPerBox;
+    if (isNaN(viewersCount) || viewersCount < 1 || viewersCount > 50) {
+      return res.status(400).json({ message: 'Viewers per box must be between 1 and 50' });
+    }
+    
     const newBox = new Box({
       name,
       vpnConfig,
       status: 'idle',
       streamUrl,
+      viewersPerBox: viewersCount,
     });
     
     await newBox.save();
@@ -73,30 +80,50 @@ exports.createBox = async (req, res) => {
 // Update a box
 exports.updateBox = async (req, res) => {
   try {
-    const { name, vpnConfig } = req.body;
-    
+    const { name, vpnConfig, streamUrl, viewersPerBox } = req.body;
     const box = await Box.findById(req.params.id);
     
     if (!box) {
       return res.status(404).json({ message: 'Box not found' });
     }
     
-    // If status is not idle, don't allow updates
-    if (box.status !== 'idle') {
-      return res.status(400).json({ message: 'Cannot update box while it is active. Please stop it first.' });
+    // Check if box is running or starting - prevent VPN changes in these states
+    if (['running', 'starting'].includes(box.status) && vpnConfig !== box.vpnConfig) {
+      return res.status(400).json({ message: 'Cannot change VPN configuration while box is running' });
     }
     
-    if (name) box.name = name;
-    
+    // Validate VPN config if changed
     if (vpnConfig && vpnConfig !== box.vpnConfig) {
-      // Check if VPN config exists
       const vpnExists = await vpnService.checkVpnConfigExists(vpnConfig);
       if (!vpnExists) {
         return res.status(400).json({ message: 'VPN configuration not found' });
       }
-      
-      box.vpnConfig = vpnConfig;
     }
+    
+    // Validate stream URL if provided
+    if (streamUrl && !streamUrl.match(/^https?:\/\/(www\.)?kick\.com\/[a-zA-Z0-9_-]+$/)) {
+      return res.status(400).json({ message: 'Invalid Kick.com URL' });
+    }
+    
+    // Validate viewersPerBox if provided
+    if (viewersPerBox !== undefined) {
+      const viewersCount = parseInt(viewersPerBox, 10);
+      if (isNaN(viewersCount) || viewersCount < 1 || viewersCount > 50) {
+        return res.status(400).json({ message: 'Viewers per box must be between 1 and 50' });
+      }
+      
+      // Can't change viewers count when running
+      if (['running', 'starting'].includes(box.status) && viewersCount !== box.viewersPerBox) {
+        return res.status(400).json({ message: 'Cannot change viewers count while box is running' });
+      }
+      
+      box.viewersPerBox = viewersCount;
+    }
+    
+    // Update box
+    if (name) box.name = name;
+    if (vpnConfig) box.vpnConfig = vpnConfig;
+    box.streamUrl = streamUrl || null; // Allow clearing streamUrl
     
     await box.save();
     
@@ -177,7 +204,7 @@ exports.startBox = async (req, res) => {
         }
         
         // Create viewers sequentially to avoid parallel save issues
-        for (let i = 0; i < config.viewer.instancesPerBox; i++) {
+        for (let i = 0; i < box.viewersPerBox; i++) {
           try {
             // Add a small delay between each viewer creation to prevent parallel saves
             if (i > 0) {
@@ -225,48 +252,73 @@ exports.startBox = async (req, res) => {
         
         logger.info(`Box ${box.name} started successfully with ${viewers.length} viewers`);
         
-        // Auto-start all viewers with delays to prevent request flooding
-        const startViewersWithDelay = async () => {
-          for (let i = 0; i < viewers.length; i++) {
-            const viewer = viewers[i];
-            try {
-              // Add a longer delay between starting each viewer to prevent request flooding
-              // and potential race conditions
-              await new Promise(resolve => setTimeout(resolve, i * 5000));
-              
-              // Make sure the viewer document still exists before starting
-              const viewerExists = await Viewer.findById(viewer._id);
-              if (!viewerExists) {
-                logger.warn(`Viewer ${viewer.name} (${viewer._id}) no longer exists, skipping auto-start`);
-                continue;
-              }
-              
-              logger.info(`Attempting to auto-start viewer ${viewer.name} (${i+1}/${viewers.length})`);
-              
-              // Start viewer with promise
+        // Improved auto-start all viewers with batching to reduce total startup time
+        const startViewersWithBatch = async () => {
+          // Configuration for batching
+          const BATCH_SIZE = 3; // Number of viewers to start in parallel
+          const BATCH_DELAY_MS = 5000; // Delay between batches
+          const VIEWERS_PER_BATCH_DELAY_MS = 500; // Small delay between viewers in the same batch
+          
+          // Process viewers in batches
+          for (let batchIndex = 0; batchIndex < Math.ceil(viewers.length / BATCH_SIZE); batchIndex++) {
+            const batchStartIndex = batchIndex * BATCH_SIZE;
+            const batchEndIndex = Math.min(batchStartIndex + BATCH_SIZE, viewers.length);
+            const currentBatch = viewers.slice(batchStartIndex, batchEndIndex);
+            
+            logger.info(`Starting batch ${batchIndex + 1} with ${currentBatch.length} viewers (${batchStartIndex + 1}-${batchEndIndex}/${viewers.length})`);
+            
+            // Start a batch of viewers with small delays between them
+            const batchPromises = currentBatch.map(async (viewer, indexInBatch) => {
               try {
-                await puppeteerService.startViewer(viewer._id);
-                logger.info(`Viewer ${viewer.name} auto-started successfully for stream: ${viewer.streamUrl}`);
-              } catch (error) {
-                logger.error(`Failed to auto-start viewer ${viewer.name}: ${error.message}`);
+                // Small delay between viewers in the same batch
+                await new Promise(resolve => setTimeout(resolve, indexInBatch * VIEWERS_PER_BATCH_DELAY_MS));
                 
-                // Update viewer with error
-                try {
-                  viewerExists.status = 'error';
-                  viewerExists.error = `Auto-start failed: ${error.message}`;
-                  await puppeteerService.saveViewerWithLock(viewerExists);
-                } catch (saveError) {
-                  logger.error(`Failed to update viewer ${viewer.name} after auto-start failure: ${saveError.message}`);
+                // Make sure the viewer document still exists before starting
+                const viewerExists = await Viewer.findById(viewer._id);
+                if (!viewerExists) {
+                  logger.warn(`Viewer ${viewer.name} (${viewer._id}) no longer exists, skipping auto-start`);
+                  return;
                 }
+                
+                const viewerNumber = batchStartIndex + indexInBatch + 1;
+                logger.info(`Attempting to auto-start viewer ${viewer.name} (${viewerNumber}/${viewers.length})`);
+                
+                // Start viewer
+                try {
+                  await puppeteerService.startViewer(viewer._id);
+                  logger.info(`Viewer ${viewer.name} auto-started successfully for stream: ${viewer.streamUrl}`);
+                } catch (error) {
+                  logger.error(`Failed to auto-start viewer ${viewer.name}: ${error.message}`);
+                  
+                  // Update viewer with error
+                  try {
+                    viewerExists.status = 'error';
+                    viewerExists.error = `Auto-start failed: ${error.message}`;
+                    await puppeteerService.saveViewerWithLock(viewerExists);
+                  } catch (saveError) {
+                    logger.error(`Failed to update viewer ${viewer.name} after auto-start failure: ${saveError.message}`);
+                  }
+                }
+              } catch (error) {
+                logger.error(`Error when trying to auto-start viewer ${viewer.name}: ${error.message}`);
               }
-            } catch (error) {
-              logger.error(`Error when trying to auto-start viewer ${viewer.name}: ${error.message}`);
+            });
+            
+            // Wait for all viewers in the current batch to complete their startup process
+            await Promise.all(batchPromises);
+            
+            // Delay between batches to prevent system overload
+            if (batchIndex < Math.ceil(viewers.length / BATCH_SIZE) - 1) {
+              logger.info(`Batch ${batchIndex + 1} complete, waiting ${BATCH_DELAY_MS}ms before starting next batch`);
+              await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
             }
           }
+          
+          logger.info(`All ${viewers.length} viewers have been started`);
         };
         
-        // Start the viewers with delay
-        startViewersWithDelay();
+        // Start the viewers with batch processing
+        startViewersWithBatch();
       })
       .catch(async (error) => {
         // VPN connection failed

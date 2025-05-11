@@ -187,7 +187,13 @@ export const AppProvider = ({ children }) => {
   // Box operations
   const createBox = async (boxData) => {
     try {
-      const response = await api.post('/boxes', boxData);
+      // Ensure viewersPerBox is passed as a number
+      const formattedData = {
+        ...boxData,
+        viewersPerBox: parseInt(boxData.viewersPerBox, 10) || 10
+      };
+      
+      const response = await api.post('/boxes', formattedData);
       setBoxes(prevBoxes => [...prevBoxes, response.data]);
       toast.success('Box created successfully');
       return response.data;
@@ -200,7 +206,13 @@ export const AppProvider = ({ children }) => {
   
   const updateBox = async (boxId, boxData) => {
     try {
-      const response = await api.put(`/boxes/${boxId}`, boxData);
+      // Ensure viewersPerBox is passed as a number
+      const formattedData = {
+        ...boxData,
+        viewersPerBox: parseInt(boxData.viewersPerBox, 10) || undefined
+      };
+      
+      const response = await api.put(`/boxes/${boxId}`, formattedData);
       setBoxes(prevBoxes => 
         prevBoxes.map(box => (box._id === boxId ? response.data : box))
       );

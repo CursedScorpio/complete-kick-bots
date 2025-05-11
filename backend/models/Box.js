@@ -21,6 +21,12 @@ const BoxSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  viewersPerBox: {
+    type: Number,
+    default: 10,
+    min: 1,
+    max: 50,
+  },
   ipAddress: {
     type: String,
     default: null,
