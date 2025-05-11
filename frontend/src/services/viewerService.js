@@ -39,6 +39,42 @@ const viewerService = {
     return response.data;
   },
   
+  // Take a screenshot of a specific tab
+  takeTabScreenshot: async (viewerId, tabIndex) => {
+    const response = await api.post(`/viewers/${viewerId}/tab-screenshot`, { tabIndex });
+    return response.data;
+  },
+  
+  // Add a new tab to a viewer
+  addTab: async (viewerId) => {
+    const response = await api.post(`/viewers/${viewerId}/add-tab`);
+    return response.data;
+  },
+  
+  // Close a tab
+  closeTab: async (viewerId, tabIndex) => {
+    const response = await api.post(`/viewers/${viewerId}/close-tab`, { tabIndex });
+    return response.data;
+  },
+  
+  // Get tab statistics
+  getTabStats: async (viewerId) => {
+    const response = await api.get(`/viewers/${viewerId}/tab-stats`);
+    return response.data;
+  },
+  
+  // Force lowest quality for a specific tab
+  forceTabLowestQuality: async (viewerId, tabIndex) => {
+    const response = await api.post(`/viewers/${viewerId}/force-tab-lowest-quality`, { tabIndex });
+    return response.data;
+  },
+  
+  // Set maximum number of tabs
+  setMaxTabs: async (viewerId, maxTabs) => {
+    const response = await api.put(`/viewers/${viewerId}`, { maxTabs });
+    return response.data;
+  },
+  
   // Get viewer logs
   getViewerLogs: async (viewerId) => {
     const response = await api.get(`/viewers/${viewerId}/logs`);
@@ -85,8 +121,14 @@ const viewerService = {
   },
   
   // Get screenshot URL
-  getScreenshotUrl: (filename) => {
-    return `${api.defaults.baseURL}/viewers/screenshots/${filename}`;
+  getScreenshotUrl: (path) => {
+    // If the path already starts with a slash, use it as is
+    if (path && path.startsWith('/')) {
+      return `${api.defaults.baseURL}${path}`;
+    }
+    
+    // Otherwise, assume it's just a filename and use the old format
+    return `${api.defaults.baseURL}/viewers/screenshots/${path}`;
   },
 };
 

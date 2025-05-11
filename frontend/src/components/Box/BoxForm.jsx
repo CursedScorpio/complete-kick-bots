@@ -14,6 +14,7 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
     vpnConfig: '',
     streamUrl: '',
     viewersPerBox: 10,
+    defaultMaxTabs: 1,
   });
   
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -27,6 +28,7 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
         vpnConfig: box.vpnConfig || '',
         streamUrl: box.streamUrl || '',
         viewersPerBox: box.viewersPerBox || 10,
+        defaultMaxTabs: box.defaultMaxTabs || 1,
       });
     } else {
       setFormData({
@@ -34,6 +36,7 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
         vpnConfig: vpnConfigs[0]?.name || '',
         streamUrl: '',
         viewersPerBox: 10,
+        defaultMaxTabs: 1,
       });
     }
   }, [isEdit, box, vpnConfigs]);
@@ -81,6 +84,12 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
     const viewersPerBox = parseInt(formData.viewersPerBox, 10);
     if (isNaN(viewersPerBox) || viewersPerBox < 1 || viewersPerBox > 50) {
       newErrors.viewersPerBox = 'Viewers per box must be between 1 and 50';
+    }
+    
+    // Validate default max tabs
+    const defaultMaxTabs = parseInt(formData.defaultMaxTabs, 10);
+    if (isNaN(defaultMaxTabs) || defaultMaxTabs < 1 || defaultMaxTabs > 10) {
+      newErrors.defaultMaxTabs = 'Default max tabs must be between 1 and 10';
     }
     
     setErrors(newErrors);
@@ -148,16 +157,16 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
       title={isEdit ? 'Edit Box' : 'Create New Box'}
       footer={modalFooter}
     >
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="space-y-4">
         {/* API Error */}
         {errors.api && (
-          <div className="mb-4 p-3 bg-danger-50 text-danger-700 rounded-md text-sm">
+          <div className="p-3 bg-danger-50 text-danger-700 rounded-md text-sm">
             {errors.api}
           </div>
         )}
         
         {/* Name Field */}
-        <div className="mb-4">
+        <div>
           <label htmlFor="name" className="block text-sm font-medium text-gray-700">
             Box Name
           </label>
@@ -178,7 +187,7 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
         </div>
         
         {/* VPN Config Field */}
-        <div className="mb-4">
+        <div>
           <label htmlFor="vpnConfig" className="block text-sm font-medium text-gray-700">
             VPN Configuration
           </label>
@@ -202,7 +211,9 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
                 errors.vpnConfig ? 'border-danger-300' : ''
               }`}
             >
-              <option value="">Select a VPN configuration</option>
+              <option value="" disabled>
+                Select VPN configuration
+              </option>
               {vpnConfigs.map((config) => (
                 <option key={config.name} value={config.name}>
                   {config.name}
@@ -217,7 +228,7 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
         </div>
         
         {/* Stream URL Field */}
-        <div className="mb-4">
+        <div>
           <label htmlFor="streamUrl" className="block text-sm font-medium text-gray-700">
             Stream URL (Optional)
           </label>
@@ -230,18 +241,19 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
             className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
               errors.streamUrl ? 'border-danger-300' : ''
             }`}
-            placeholder="https://kick.com/streamername"
+            placeholder="https://kick.com/streamer"
           />
-          {errors.streamUrl && (
+          {errors.streamUrl ? (
             <p className="mt-1 text-sm text-danger-600">{errors.streamUrl}</p>
+          ) : (
+            <p className="mt-1 text-xs text-gray-500">
+              Leave empty to set stream URL later per viewer
+            </p>
           )}
-          <p className="mt-1 text-xs text-gray-500">
-            The stream URL will be assigned to all viewers when the box is started.
-          </p>
         </div>
         
         {/* Viewers Per Box Field */}
-        <div className="mb-4">
+        <div>
           <label htmlFor="viewersPerBox" className="block text-sm font-medium text-gray-700">
             Viewers Per Box
           </label>
@@ -257,21 +269,39 @@ const BoxForm = ({ isOpen, onClose, box = null, isEdit = false }) => {
               errors.viewersPerBox ? 'border-danger-300' : ''
             }`}
           />
-          {errors.viewersPerBox && (
+          {errors.viewersPerBox ? (
             <p className="mt-1 text-sm text-danger-600">{errors.viewersPerBox}</p>
+          ) : (
+            <p className="mt-1 text-xs text-gray-500">
+              Number of viewers to create in this box (1-50)
+            </p>
           )}
-          <p className="mt-1 text-xs text-gray-500">
-            Number of viewers to create when starting this box (between 1 and 50).
-          </p>
         </div>
         
-        {/* Info Text */}
-        <div className="mt-4 text-sm text-gray-500">
-          <p>
-            {isEdit
-              ? 'Update the box configuration. Note that you cannot change VPN configuration or viewers count while the box is running.'
-              : 'Create a new box with the selected VPN configuration and specified number of viewers.'}
-          </p>
+        {/* Default Max Tabs Field */}
+        <div>
+          <label htmlFor="defaultMaxTabs" className="block text-sm font-medium text-gray-700">
+            Default Max Tabs Per Viewer
+          </label>
+          <input
+            type="number"
+            id="defaultMaxTabs"
+            name="defaultMaxTabs"
+            value={formData.defaultMaxTabs}
+            onChange={handleChange}
+            min="1"
+            max="10"
+            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm ${
+              errors.defaultMaxTabs ? 'border-danger-300' : ''
+            }`}
+          />
+          {errors.defaultMaxTabs ? (
+            <p className="mt-1 text-sm text-danger-600">{errors.defaultMaxTabs}</p>
+          ) : (
+            <p className="mt-1 text-xs text-gray-500">
+              Maximum number of tabs each viewer can have (1-10)
+            </p>
+          )}
         </div>
       </form>
     </Modal>

@@ -37,7 +37,7 @@ exports.getBoxById = async (req, res) => {
 // Create a new box
 exports.createBox = async (req, res) => {
   try {
-    const { name, vpnConfig, streamUrl, viewersPerBox } = req.body;
+    const { name, vpnConfig, streamUrl, viewersPerBox, defaultMaxTabs } = req.body;
     
     if (!name || !vpnConfig) {
       return res.status(400).json({ message: 'Name and VPN config are required' });
@@ -60,12 +60,19 @@ exports.createBox = async (req, res) => {
       return res.status(400).json({ message: 'Viewers per box must be between 1 and 50' });
     }
     
+    // Validate defaultMaxTabs if provided
+    const maxTabs = defaultMaxTabs ? parseInt(defaultMaxTabs, 10) : 1;
+    if (isNaN(maxTabs) || maxTabs < 1 || maxTabs > 10) {
+      return res.status(400).json({ message: 'Default max tabs must be between 1 and 10' });
+    }
+    
     const newBox = new Box({
       name,
       vpnConfig,
       status: 'idle',
       streamUrl,
       viewersPerBox: viewersCount,
+      defaultMaxTabs: maxTabs,
     });
     
     await newBox.save();
@@ -80,7 +87,7 @@ exports.createBox = async (req, res) => {
 // Update a box
 exports.updateBox = async (req, res) => {
   try {
-    const { name, vpnConfig, streamUrl, viewersPerBox } = req.body;
+    const { name, vpnConfig, streamUrl, viewersPerBox, defaultMaxTabs } = req.body;
     const box = await Box.findById(req.params.id);
     
     if (!box) {
@@ -118,6 +125,16 @@ exports.updateBox = async (req, res) => {
       }
       
       box.viewersPerBox = viewersCount;
+    }
+    
+    // Validate defaultMaxTabs if provided
+    if (defaultMaxTabs !== undefined) {
+      const maxTabs = parseInt(defaultMaxTabs, 10);
+      if (isNaN(maxTabs) || maxTabs < 1 || maxTabs > 10) {
+        return res.status(400).json({ message: 'Default max tabs must be between 1 and 10' });
+      }
+      
+      box.defaultMaxTabs = maxTabs;
     }
     
     // Update box
@@ -218,6 +235,8 @@ exports.startBox = async (req, res) => {
               // Assign streamUrl and streamer if available
               streamUrl: box.streamUrl || null,
               streamer: streamer || null,
+              // Apply the max tabs setting from the box, but only if it's set
+              ...(box.defaultMaxTabs && { maxTabs: box.defaultMaxTabs }),
               // Only one viewer per box will parse chat
               isParseChatEnabled: i === 0, // First viewer parses chat
             });
@@ -285,7 +304,7 @@ exports.startBox = async (req, res) => {
                 
                 // Start viewer
                 try {
-                  await puppeteerService.startViewer(viewer._id);
+                  await puppeteerService.startViewer(viewer._id, viewerExists.maxTabs || 1);
                   logger.info(`Viewer ${viewer.name} auto-started successfully for stream: ${viewer.streamUrl}`);
                 } catch (error) {
                   logger.error(`Failed to auto-start viewer ${viewer.name}: ${error.message}`);

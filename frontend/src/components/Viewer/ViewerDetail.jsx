@@ -26,6 +26,9 @@ const ViewerDetail = ({ viewerId }) => {
   const [viewerLogs, setViewerLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logsInterval, setLogsInterval] = useState(null);
+  const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const [maxTabs, setMaxTabs] = useState(1);
+  const [isMaxTabsFormVisible, setIsMaxTabsFormVisible] = useState(false);
   
   const navigate = useNavigate();
   
@@ -46,6 +49,13 @@ const ViewerDetail = ({ viewerId }) => {
       loadViewerDetails();
     }
   }, [viewerId, fetchViewerDetails]);
+  
+  // Set max tabs when selected viewer changes
+  useEffect(() => {
+    if (selectedViewer) {
+      setMaxTabs(selectedViewer.maxTabs || 1);
+    }
+  }, [selectedViewer]);
   
   // Start/stop polling based on viewer status
   useEffect(() => {
@@ -178,13 +188,85 @@ const ViewerDetail = ({ viewerId }) => {
   
   const handleTakeScreenshot = async () => {
     try {
-      await takeViewerScreenshot(viewerId);
+      if (selectedViewer?.tabs && selectedViewer.tabs.length > 0) {
+        await viewerService.takeTabScreenshot(viewerId, activeTabIndex);
+      } else {
+        await takeViewerScreenshot(viewerId);
+      }
       // Refresh viewer details to get the new screenshot URL
       setTimeout(() => {
         fetchViewerDetails(viewerId);
       }, 1000);
     } catch (error) {
       console.error('Failed to take screenshot:', error);
+    }
+  };
+  
+  const handleMaxTabsChange = (e) => {
+    const value = parseInt(e.target.value, 10);
+    setMaxTabs(value);
+  };
+  
+  const handleSetMaxTabs = async (e) => {
+    e.preventDefault();
+    
+    if (maxTabs < 1 || maxTabs > 10) return;
+    
+    try {
+      await viewerService.setMaxTabs(viewerId, maxTabs);
+      setIsMaxTabsFormVisible(false);
+      await fetchViewerDetails(viewerId);
+    } catch (error) {
+      console.error('Failed to set max tabs:', error);
+    }
+  };
+  
+  const handleCancelMaxTabsForm = () => {
+    setIsMaxTabsFormVisible(false);
+    setMaxTabs(selectedViewer?.maxTabs || 1);
+  };
+  
+  const handleAddTab = async () => {
+    try {
+      await viewerService.addTab(viewerId);
+      await fetchViewerDetails(viewerId);
+      // Set active tab to the newly created tab
+      if (selectedViewer && selectedViewer.tabs) {
+        setActiveTabIndex(selectedViewer.tabs.length);
+      }
+    } catch (error) {
+      console.error('Failed to add tab:', error);
+    }
+  };
+  
+  const handleCloseTab = async (tabIndex) => {
+    try {
+      await viewerService.closeTab(viewerId, tabIndex);
+      
+      // If closing the active tab, switch to the previous tab
+      if (tabIndex === activeTabIndex && activeTabIndex > 0) {
+        setActiveTabIndex(activeTabIndex - 1);
+      } else if (tabIndex < activeTabIndex) {
+        // If closing a tab before the active tab, adjust the active tab index
+        setActiveTabIndex(activeTabIndex - 1);
+      }
+      
+      await fetchViewerDetails(viewerId);
+    } catch (error) {
+      console.error('Failed to close tab:', error);
+    }
+  };
+  
+  const handleTabClick = (tabIndex) => {
+    setActiveTabIndex(tabIndex);
+  };
+  
+  const handleForceTabLowestQuality = async (tabIndex) => {
+    try {
+      await viewerService.forceTabLowestQuality(viewerId, tabIndex);
+      await fetchViewerDetails(viewerId);
+    } catch (error) {
+      console.error('Failed to force lowest quality for tab:', error);
     }
   };
   
@@ -200,330 +282,384 @@ const ViewerDetail = ({ viewerId }) => {
   // Not found state
   if (!selectedViewer) {
     return (
-      <div className="text-center py-12">
-        <div className="text-danger-600 text-lg mb-4">Viewer not found</div>
-        <Button variant="primary" onClick={handleBack}>
-          Back to Viewers
-        </Button>
+      <div className="p-4">
+        <div className="flex mb-4">
+          <Button onClick={handleBack} variant="secondary">
+            Back
+          </Button>
+        </div>
+        <Card>
+          <div className="p-4 text-center">
+            <h2 className="text-xl font-semibold text-gray-700">Viewer not found</h2>
+          </div>
+        </Card>
       </div>
     );
   }
   
+  // Get screenshot URL for the active tab
+  const getActiveTabScreenshotUrl = () => {
+    if (selectedViewer.tabs && selectedViewer.tabs[activeTabIndex] && selectedViewer.tabs[activeTabIndex].lastScreenshotUrl) {
+      return viewerService.getScreenshotUrl(selectedViewer.tabs[activeTabIndex].lastScreenshotUrl);
+    }
+    
+    if (selectedViewer.lastScreenshotUrl) {
+      return viewerService.getScreenshotUrl(selectedViewer.lastScreenshotUrl);
+    }
+    
+    return null;
+  };
+  
+  // Get the screenshot timestamp for the active tab
+  const getActiveTabScreenshotTimestamp = () => {
+    if (selectedViewer.tabs && selectedViewer.tabs[activeTabIndex] && selectedViewer.tabs[activeTabIndex].lastScreenshotTimestamp) {
+      return new Date(selectedViewer.tabs[activeTabIndex].lastScreenshotTimestamp).toLocaleString();
+    }
+    
+    if (selectedViewer.lastScreenshotTimestamp) {
+      return new Date(selectedViewer.lastScreenshotTimestamp).toLocaleString();
+    }
+    
+    return 'Never';
+  };
+  
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center space-y-4 md:space-y-0">
-        <div className="flex items-center">
-          <button
-            onClick={handleBack}
-            className="mr-3 text-gray-400 hover:text-gray-500"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
-            </svg>
-          </button>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center">
-              {selectedViewer.name}
-              {isLoading && <Spinner size="sm" className="ml-2" />}
-            </h2>
-            <div className="flex items-center mt-1">
-              <StatusBadge status={selectedViewer.status} />
-              {selectedViewer.box && (
-                <span className="ml-2 text-sm text-gray-500">
-                  Box: {selectedViewer.box.name}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-        
+    <div className="p-4">
+      {/* Header with back button and actions */}
+      <div className="flex justify-between mb-4">
+        <Button onClick={handleBack} variant="secondary">
+          Back
+        </Button>
         <div className="flex space-x-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleRefresh}
-            icon={
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-              </svg>
-            }
-          >
+          {selectedViewer.status === 'running' && (
+            <>
+              <Button onClick={() => setIsStreamFormVisible(true)} variant="primary">
+                Change Stream
+              </Button>
+              <Button onClick={handleStopViewer} variant="danger">
+                Stop Viewer
+              </Button>
+            </>
+          )}
+          <Button onClick={handleRefresh} variant="secondary">
             Refresh
           </Button>
-          
-          {!isStreamFormVisible && selectedViewer.status === 'running' && (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setIsStreamFormVisible(true)}
-            >
-              Set Stream
-            </Button>
-          )}
-          
-          {selectedViewer.status === 'running' && (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleTakeScreenshot}
-            >
-              Take Screenshot
-            </Button>
-          )}
-          
-          {(selectedViewer.status === 'running' || selectedViewer.status === 'starting') && (
-            <Button
-              variant="warning"
-              size="sm"
-              onClick={handleStopViewer}
-            >
-              Stop Viewer
-            </Button>
-          )}
         </div>
       </div>
       
-      {/* Stream URL Form */}
-      {isStreamFormVisible && (
-        <Card>
-          <form onSubmit={handleSetStream} className="space-y-3">
-            <div>
-              <label htmlFor="streamUrl" className="block text-sm font-medium text-gray-700">
-                Stream URL
-              </label>
-              <input
-                id="streamUrl"
-                type="text"
-                value={streamUrl}
-                onChange={handleStreamUrlChange}
-                placeholder="https://kick.com/streamername"
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Enter a valid Kick.com stream URL (e.g., https://kick.com/streamername)
-              </p>
-            </div>
-            <div className="flex space-x-2">
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-              >
-                Set Stream
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleCancelStreamForm}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </Card>
-      )}
-      
-      {/* Content Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Viewer Details */}
-        <Card title="Viewer Details">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-500">Status</label>
-              <div className="mt-1">
-                <StatusBadge status={selectedViewer.status} />
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-500">Box</label>
-              <div className="mt-1 text-sm">
-                {selectedViewer.box?.name || 'Unknown'}
-                {selectedViewer.box?.ipAddress && ` (${selectedViewer.box.ipAddress})`}
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-500">Stream</label>
-              <div className="mt-1 text-sm">
-                {selectedViewer.streamUrl ? (
-                  <a
-                    href={selectedViewer.streamUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary-600 hover:underline"
-                  >
-                    {selectedViewer.streamer || selectedViewer.streamUrl}
-                  </a>
-                ) : (
-                  'No stream assigned'
-                )}
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-500">Chat Parsing</label>
-              <div className="mt-1 text-sm">
-                {selectedViewer.isParseChatEnabled ? (
-                  <span className="text-success-600">Enabled</span>
-                ) : (
-                  <span className="text-gray-500">Disabled</span>
-                )}
-              </div>
-            </div>
-            
-            {selectedViewer.playbackStatus && (
-              <div>
-                <label className="block text-sm font-medium text-gray-500">Playback Status</label>
-                <div className="mt-1 text-sm">
-                  {selectedViewer.playbackStatus.isPlaying ? (
-                    <span className="text-success-600">Playing</span>
-                  ) : (
-                    <span className="text-gray-500">Not playing</span>
-                  )}
-                  {selectedViewer.playbackStatus.resolution && (
-                    <span className="ml-2">({selectedViewer.playbackStatus.resolution})</span>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            {selectedViewer.streamMetadata && selectedViewer.streamMetadata.title && (
-              <div>
-                <label className="block text-sm font-medium text-gray-500">Stream Title</label>
-                <div className="mt-1 text-sm">{selectedViewer.streamMetadata.title}</div>
-              </div>
-            )}
-            
-            {selectedViewer.streamMetadata && selectedViewer.streamMetadata.game && (
-              <div>
-                <label className="block text-sm font-medium text-gray-500">Game</label>
-                <div className="mt-1 text-sm">{selectedViewer.streamMetadata.game}</div>
-              </div>
-            )}
-            
-            {selectedViewer.error && (
-              <div>
-                <label className="block text-sm font-medium text-danger-500">Error</label>
-                <div className="mt-1 text-sm text-danger-600 bg-danger-50 p-2 rounded-md">
-                  {selectedViewer.error}
-                </div>
-              </div>
-            )}
+      {/* Viewer details card */}
+      <Card className="mb-4">
+        <div className="p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-700">{selectedViewer.name}</h2>
+            <StatusBadge status={selectedViewer.status} />
           </div>
-        </Card>
-        
-        {/* Screenshot */}
-        <Card title="Screenshot">
-          {selectedViewer.lastScreenshotUrl ? (
-            <div className="flex flex-col items-center">
-              <img
-                src={viewerService.getScreenshotUrl(selectedViewer.lastScreenshotUrl.split('/').pop())}
-                alt="Viewer Screenshot"
-                className="max-w-full h-auto border border-gray-200 rounded-md"
-              />
-              <div className="mt-2 text-xs text-gray-500">
-                Last updated: {new Date(selectedViewer.lastScreenshotTimestamp).toLocaleString()}
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <h3 className="text-lg font-semibold mb-2">Viewer Details</h3>
+              <div className="space-y-2">
+                <div>
+                  <span className="font-medium">Status:</span> {selectedViewer.status}
+                  {isPolling && <span className="ml-2 text-gray-500 text-sm">(Polling...)</span>}
+                </div>
+                <div>
+                  <span className="font-medium">Box:</span>{' '}
+                  {selectedViewer.box ? selectedViewer.box.name : 'Not assigned'}
+                </div>
+                <div>
+                  <span className="font-medium">IP Address:</span>{' '}
+                  {selectedViewer.box ? selectedViewer.box.ipAddress : 'N/A'}
+                </div>
+                <div>
+                  <span className="font-medium">Streaming:</span>{' '}
+                  {selectedViewer.streamUrl ? (
+                    <a
+                      href={selectedViewer.streamUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline"
+                    >
+                      {selectedViewer.streamer}
+                    </a>
+                  ) : (
+                    'Not streaming'
+                  )}
+                </div>
+                <div className="flex items-center">
+                  <span className="font-medium mr-2">Max Tabs:</span> {selectedViewer.maxTabs || 1}
+                  {selectedViewer.status === 'idle' && (
+                    <Button
+                      onClick={() => setIsMaxTabsFormVisible(true)}
+                      variant="secondary"
+                      size="xs"
+                      className="ml-2"
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </div>
+                <div>
+                  <span className="font-medium">Active Tabs:</span>{' '}
+                  {selectedViewer.tabs ? selectedViewer.tabs.length : 0}
+                </div>
+                {selectedViewer.error && (
+                  <div className="text-red-500">
+                    <span className="font-medium">Error:</span> {selectedViewer.error}
+                  </div>
+                )}
               </div>
-              {selectedViewer.status === 'running' && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="mt-3"
-                  onClick={handleTakeScreenshot}
-                >
-                  Take New Screenshot
-                </Button>
+            </div>
+            
+            <div>
+              <h3 className="text-lg font-semibold mb-2">Playback Status</h3>
+              {selectedViewer.tabs && selectedViewer.tabs.length > 0 && selectedViewer.tabs[activeTabIndex]?.playbackStatus ? (
+                <div className="space-y-2">
+                  <div>
+                    <span className="font-medium">Playing:</span>{' '}
+                    {selectedViewer.tabs[activeTabIndex].playbackStatus.isPlaying ? 'Yes' : 'No'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Quality:</span>{' '}
+                    {selectedViewer.tabs[activeTabIndex].playbackStatus.quality || 'Unknown'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Resolution:</span>{' '}
+                    {selectedViewer.tabs[activeTabIndex].playbackStatus.resolution || 'Unknown'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Buffering:</span>{' '}
+                    {selectedViewer.tabs[activeTabIndex].playbackStatus.buffering ? 'Yes' : 'No'}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div>
+                    <span className="font-medium">Playing:</span>{' '}
+                    {selectedViewer.playbackStatus.isPlaying ? 'Yes' : 'No'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Quality:</span>{' '}
+                    {selectedViewer.playbackStatus.quality || 'Unknown'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Resolution:</span>{' '}
+                    {selectedViewer.playbackStatus.resolution || 'Unknown'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Buffering:</span>{' '}
+                    {selectedViewer.playbackStatus.buffering ? 'Yes' : 'No'}
+                  </div>
+                </div>
               )}
             </div>
-          ) : (
-            <div className="text-center py-8">
-              <svg
-                className="mx-auto h-12 w-12 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                ></path>
-              </svg>
-              <p className="mt-2 text-sm text-gray-500">No screenshot available</p>
+          </div>
+          
+          {/* Tab Management Section */}
+          {selectedViewer.status === 'running' && (
+            <div className="mt-4">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-lg font-semibold">Tabs</h3>
+                {selectedViewer.tabs && selectedViewer.tabs.length < (selectedViewer.maxTabs || 1) && (
+                  <Button onClick={handleAddTab} variant="primary" size="sm">
+                    Add Tab
+                  </Button>
+                )}
+              </div>
+              
+              {/* Tab Navigation */}
+              {selectedViewer.tabs && selectedViewer.tabs.length > 0 ? (
+                <div className="mb-4">
+                  <div className="flex border-b border-gray-200">
+                    {selectedViewer.tabs.map((tab, index) => (
+                      <div
+                        key={index}
+                        className={`cursor-pointer py-2 px-4 relative ${
+                          activeTabIndex === index
+                            ? 'border-b-2 border-blue-500 text-blue-600'
+                            : 'text-gray-600 hover:text-gray-800'
+                        }`}
+                        onClick={() => handleTabClick(index)}
+                      >
+                        Tab {index + 1}
+                        {selectedViewer.tabs.length > 1 && (
+                          <button
+                            className="ml-2 text-gray-400 hover:text-red-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCloseTab(index);
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                        <StatusBadge
+                          status={tab.status || 'idle'}
+                          className="absolute -top-2 -right-2 scale-75"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Tab Actions */}
+                  <div className="mt-4 flex space-x-2">
+                    <Button onClick={handleTakeScreenshot} variant="primary" size="sm">
+                      Take Screenshot
+                    </Button>
+                    <Button
+                      onClick={() => handleForceTabLowestQuality(activeTabIndex)}
+                      variant="secondary"
+                      size="sm"
+                    >
+                      Force Lowest Quality
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-gray-500 mb-4">No tabs available</div>
+              )}
+            </div>
+          )}
+          
+          {/* Screenshot section */}
+          <div className="mt-4">
+            <h3 className="text-lg font-semibold mb-2">Screenshot</h3>
+            <div className="flex items-center mb-2">
+              <span className="text-sm text-gray-500">
+                Last taken: {getActiveTabScreenshotTimestamp()}
+              </span>
               {selectedViewer.status === 'running' && (
                 <Button
+                  onClick={handleTakeScreenshot}
                   variant="primary"
                   size="sm"
-                  className="mt-3"
-                  onClick={handleTakeScreenshot}
+                  className="ml-auto"
                 >
                   Take Screenshot
                 </Button>
               )}
             </div>
-          )}
-        </Card>
-        
-        {/* Logs */}
-        <Card title="Logs" className="md:col-span-2">
-          {isLoadingLogs ? (
-            <div className="flex justify-center items-center py-8">
-              <Spinner size="md" />
-            </div>
-          ) : viewerLogs && viewerLogs.length > 0 ? (
-            <div className="overflow-auto max-h-96">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      Time
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      Level
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      Message
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {viewerLogs.map((log, index) => (
-                    <tr key={index}>
-                      <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </td>
-                      <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
-                        {log.level || 'info'}
-                      </td>
-                      <td className="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
-                        {log.message}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-6 text-gray-500">
-              No logs available
-            </div>
-          )}
-        </Card>
-      </div>
+            
+            {getActiveTabScreenshotUrl() ? (
+              <div className="border rounded-lg overflow-hidden">
+                <img
+                  src={getActiveTabScreenshotUrl()}
+                  alt="Viewer Screenshot"
+                  className="max-w-full h-auto"
+                />
+              </div>
+            ) : (
+              <div className="border rounded-lg p-8 text-center text-gray-500">
+                No screenshot available
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+      
+      {/* Stream URL Form Dialog */}
+      {isStreamFormVisible && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Set Stream URL</h3>
+            <form onSubmit={handleSetStream}>
+              <div className="mb-4">
+                <label className="block text-gray-700 text-sm font-medium mb-2">
+                  Stream URL
+                </label>
+                <input
+                  type="text"
+                  value={streamUrl}
+                  onChange={handleStreamUrlChange}
+                  placeholder="https://kick.com/streamer"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  Supported format: https://kick.com/streamer
+                </p>
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button onClick={handleCancelStreamForm} variant="secondary" type="button">
+                  Cancel
+                </Button>
+                <Button variant="primary" type="submit">
+                  Set Stream
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      
+      {/* Max Tabs Form Dialog */}
+      {isMaxTabsFormVisible && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Set Maximum Tabs</h3>
+            <form onSubmit={handleSetMaxTabs}>
+              <div className="mb-4">
+                <label className="block text-gray-700 text-sm font-medium mb-2">
+                  Maximum Tabs
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={maxTabs}
+                  onChange={handleMaxTabsChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  Set the maximum number of tabs this viewer can have (1-10)
+                </p>
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button onClick={handleCancelMaxTabsForm} variant="secondary" type="button">
+                  Cancel
+                </Button>
+                <Button variant="primary" type="submit">
+                  Save
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      
+      {/* Logs section */}
+      <Card>
+        <div className="p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">Logs</h3>
+            {isLoadingLogs && <Spinner size="sm" />}
+          </div>
+          <div className="bg-gray-800 text-white font-mono text-sm p-4 rounded-md h-64 overflow-y-auto">
+            {viewerLogs.length > 0 ? (
+              viewerLogs.map((log, index) => (
+                <div
+                  key={index}
+                  className={`mb-1 ${
+                    log.level === 'error'
+                      ? 'text-red-400'
+                      : log.level === 'warn'
+                      ? 'text-yellow-400'
+                      : 'text-green-400'
+                  }`}
+                >
+                  <span className="text-gray-400">
+                    {new Date(log.timestamp).toLocaleString()}
+                  </span>{' '}
+                  [{log.level.toUpperCase()}] {log.message}
+                </div>
+              ))
+            ) : (
+              <div className="text-gray-400">No logs available</div>
+            )}
+          </div>
+        </div>
+      </Card>
     </div>
   );
 };

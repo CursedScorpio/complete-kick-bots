@@ -80,6 +80,11 @@ const ViewerCard = ({ viewer }) => {
             <div className="text-sm text-gray-500">No stream assigned</div>
           )}
           
+          {/* Display tab information */}
+          <div className="mt-2 text-sm">
+            <span className="font-medium">Tabs:</span> {viewer.tabs ? viewer.tabs.length : 0} / {viewer.maxTabs || 1}
+          </div>
+          
           {viewer.isParseChatEnabled && (
             <div className="mt-2 text-xs text-success-600 bg-success-50 px-2 py-1 rounded inline-block">
               Chat Parser Enabled

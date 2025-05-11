@@ -344,6 +344,14 @@ const BoxDetail = ({ boxId }) => {
                 </div>
               </div>
               
+              <div>
+                <label className="block text-sm font-medium text-gray-500">Default Max Tabs</label>
+                <div className="mt-1 text-sm">
+                  <span className="font-medium">{selectedBox.defaultMaxTabs || 1}</span>
+                  <span className="text-gray-500"> tabs per viewer</span>
+                </div>
+              </div>
+              
               {selectedBox.error && (
                 <div>
                   <label className="block text-sm font-medium text-danger-500">Error</label>

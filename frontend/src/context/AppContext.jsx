@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
+import viewerService from '../services/viewerService';
 
 // Create context
 const AppContext = createContext();
@@ -311,27 +312,22 @@ export const AppProvider = ({ children }) => {
   // Viewer operations
   const updateViewer = async (viewerId, viewerData) => {
     try {
-      const response = await api.put(`/viewers/${viewerId}`, viewerData);
+      const response = await viewerService.updateViewer(viewerId, viewerData);
       
+      // Update local state
       setViewers(prevViewers => 
         prevViewers.map(viewer => 
-          viewer._id === viewerId ? response.data : viewer
+          viewer._id === viewerId ? response : viewer
         )
       );
       
-      // Update the selected viewer if it's the one being updated
-      if (selectedViewer?._id === viewerId) {
-        setSelectedViewer(response.data);
+      // If this is the selected viewer, update that too
+      if (selectedViewer && selectedViewer._id === viewerId) {
+        setSelectedViewer(response);
       }
       
       toast.success('Viewer updated successfully');
-      
-      // Refresh after a short delay to get updated status
-      setTimeout(() => {
-        fetchViewers();
-      }, 3000);
-      
-      return response.data;
+      return response;
     } catch (error) {
       console.error('Error updating viewer:', error);
       toast.error(error.response?.data?.message || 'Failed to update viewer');
@@ -462,6 +458,119 @@ export const AppProvider = ({ children }) => {
     }
   };
   
+  // Set the maximum number of tabs for a viewer
+  const setMaxTabs = async (viewerId, maxTabs) => {
+    try {
+      const response = await viewerService.setMaxTabs(viewerId, maxTabs);
+      
+      // Update local state
+      setViewers(prevViewers => 
+        prevViewers.map(viewer => 
+          viewer._id === viewerId ? response : viewer
+        )
+      );
+      
+      // If this is the selected viewer, update that too
+      if (selectedViewer && selectedViewer._id === viewerId) {
+        setSelectedViewer(response);
+      }
+      
+      toast.success('Max tabs updated successfully');
+      return response;
+    } catch (error) {
+      console.error('Error setting max tabs:', error);
+      toast.error(error.response?.data?.message || 'Failed to set max tabs');
+      throw error;
+    }
+  };
+
+  // Add a new tab to a viewer
+  const addViewerTab = async (viewerId) => {
+    try {
+      const response = await viewerService.addTab(viewerId);
+      
+      // Update the selected viewer if this is the current one
+      if (selectedViewer && selectedViewer._id === viewerId) {
+        // We'll need to fetch the full viewer details to get the updated tabs
+        const updatedViewer = await viewerService.getViewerById(viewerId);
+        setSelectedViewer(updatedViewer);
+      }
+      
+      toast.success('Tab added successfully');
+      return response;
+    } catch (error) {
+      console.error('Error adding tab:', error);
+      toast.error(error.response?.data?.message || 'Failed to add tab');
+      throw error;
+    }
+  };
+
+  // Close a tab
+  const closeViewerTab = async (viewerId, tabIndex) => {
+    try {
+      const response = await viewerService.closeTab(viewerId, tabIndex);
+      
+      // Update the selected viewer if this is the current one
+      if (selectedViewer && selectedViewer._id === viewerId) {
+        // We'll need to fetch the full viewer details to get the updated tabs
+        const updatedViewer = await viewerService.getViewerById(viewerId);
+        setSelectedViewer(updatedViewer);
+      }
+      
+      toast.success('Tab closed successfully');
+      return response;
+    } catch (error) {
+      console.error('Error closing tab:', error);
+      toast.error(error.response?.data?.message || 'Failed to close tab');
+      throw error;
+    }
+  };
+
+  // Take a screenshot of a specific tab
+  const takeTabScreenshot = async (viewerId, tabIndex) => {
+    try {
+      const response = await viewerService.takeTabScreenshot(viewerId, tabIndex);
+      
+      // Update the selected viewer if this is the current one
+      if (selectedViewer && selectedViewer._id === viewerId) {
+        // We'll need to fetch the full viewer details to get the updated screenshot
+        const updatedViewer = await viewerService.getViewerById(viewerId);
+        setSelectedViewer(updatedViewer);
+      }
+      
+      toast.success('Screenshot taken successfully');
+      return response;
+    } catch (error) {
+      console.error('Error taking tab screenshot:', error);
+      toast.error(error.response?.data?.message || 'Failed to take screenshot');
+      throw error;
+    }
+  };
+
+  // Force lowest quality for a specific tab
+  const forceTabLowestQuality = async (viewerId, tabIndex) => {
+    try {
+      const response = await viewerService.forceTabLowestQuality(viewerId, tabIndex);
+      toast.success('Forced lowest quality for tab');
+      return response;
+    } catch (error) {
+      console.error('Error forcing lowest quality:', error);
+      toast.error(error.response?.data?.message || 'Failed to force lowest quality');
+      throw error;
+    }
+  };
+
+  // Get tab statistics
+  const getTabStats = async (viewerId) => {
+    try {
+      return await viewerService.getTabStats(viewerId);
+    } catch (error) {
+      console.error('Error getting tab stats:', error);
+      toast.error(error.response?.data?.message || 'Failed to get tab statistics');
+      throw error;
+    }
+  };
+
   // Context value
   const contextValue = {
     // Data
@@ -507,6 +616,14 @@ export const AppProvider = ({ children }) => {
     testVpnConnection,
     uploadVpnConfig,
     deleteVpnConfig,
+    
+    // Tab operations
+    setMaxTabs,
+    addViewerTab,
+    closeViewerTab,
+    takeTabScreenshot,
+    forceTabLowestQuality,
+    getTabStats,
   };
   
   return (

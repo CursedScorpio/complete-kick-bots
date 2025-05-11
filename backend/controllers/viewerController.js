@@ -39,7 +39,7 @@ exports.getViewerById = async (req, res) => {
 // Update a viewer
 exports.updateViewer = async (req, res) => {
   try {
-    const { streamUrl } = req.body;
+    const { streamUrl, maxTabs } = req.body;
     
     const viewer = await Viewer.findById(req.params.id).populate('box');
     
@@ -50,6 +50,15 @@ exports.updateViewer = async (req, res) => {
     // Validate box status
     if (viewer.box.status !== 'running') {
       return res.status(400).json({ message: 'Box is not running. Start the box first.' });
+    }
+    
+    // Update maxTabs if provided (limit to 1-10 tabs)
+    if (maxTabs !== undefined) {
+      const numTabs = parseInt(maxTabs, 10);
+      if (isNaN(numTabs) || numTabs < 1 || numTabs > 10) {
+        return res.status(400).json({ message: 'maxTabs must be between 1 and 10' });
+      }
+      viewer.maxTabs = numTabs;
     }
     
     if (streamUrl) {
@@ -81,15 +90,15 @@ exports.updateViewer = async (req, res) => {
         }
       }
       
-      // If viewer is idle, start it
+      // If viewer is idle, start it with the specified number of tabs
       if (viewer.status === 'idle') {
         viewer.status = 'starting';
         await puppeteerService.saveViewerWithLock(viewer);
         
-        // Start viewer async
-        puppeteerService.startViewer(viewer._id)
+        // Start viewer async with specified number of tabs
+        puppeteerService.startViewer(viewer._id, viewer.maxTabs)
           .then(() => {
-            logger.info(`Viewer ${viewer.name} started successfully for stream: ${streamUrl}`);
+            logger.info(`Viewer ${viewer.name} started successfully with ${viewer.maxTabs} tabs for stream: ${streamUrl}`);
           })
           .catch(async (error) => {
             viewer.status = 'error';
@@ -271,14 +280,31 @@ exports.getViewerLogs = async (req, res) => {
 // Serve screenshot image
 exports.serveScreenshot = async (req, res) => {
   try {
-    const screenshotPath = path.join(__dirname, '../screenshots', req.params.filename);
-    
-    // Check if file exists
-    if (!fs.existsSync(screenshotPath)) {
-      return res.status(404).json({ message: 'Screenshot not found' });
+    // Check if the path includes a viewerId
+    if (req.params.filename.includes('/')) {
+      // Path format: viewerId/filename.jpg
+      const parts = req.params.filename.split('/');
+      const viewerId = parts[0];
+      const filename = parts[1];
+      const screenshotPath = path.join(__dirname, '../screenshots', viewerId, filename);
+      
+      // Check if file exists
+      if (!fs.existsSync(screenshotPath)) {
+        return res.status(404).json({ message: 'Screenshot not found' });
+      }
+      
+      res.sendFile(screenshotPath);
+    } else {
+      // Old path format: just filename
+      const screenshotPath = path.join(__dirname, '../screenshots', req.params.filename);
+      
+      // Check if file exists
+      if (!fs.existsSync(screenshotPath)) {
+        return res.status(404).json({ message: 'Screenshot not found' });
+      }
+      
+      res.sendFile(screenshotPath);
     }
-    
-    res.sendFile(screenshotPath);
   } catch (error) {
     logger.error(`Error serving screenshot: ${error.message}`);
     res.status(500).json({ message: 'Error serving screenshot', error: error.message });
@@ -325,5 +351,182 @@ exports.forceAllViewersLowestQuality = async (req, res) => {
       message: 'Error setting lowest quality for all viewers', 
       error: error.message 
     });
+  }
+};
+
+// Get tab screenshot
+exports.getTabScreenshot = async (req, res) => {
+  try {
+    const { id: viewerId } = req.params;
+    const { tabIndex } = req.body;
+    
+    const viewer = await Viewer.findById(viewerId);
+    
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    if (viewer.status !== 'running') {
+      return res.status(400).json({ message: 'Viewer is not running' });
+    }
+    
+    // Validate tab index
+    if (tabIndex === undefined || tabIndex < 0 || tabIndex >= viewer.tabs.length) {
+      return res.status(400).json({ message: 'Invalid tab index' });
+    }
+    
+    // Take screenshot for the specified tab
+    await puppeteerService.takeTabScreenshot(viewerId, tabIndex);
+    
+    // Get updated viewer with screenshot URL
+    const updatedViewer = await Viewer.findById(viewerId);
+    
+    res.status(200).json({
+      message: 'Screenshot taken',
+      tabIndex,
+      screenshotUrl: updatedViewer.tabs[tabIndex].lastScreenshotUrl,
+      timestamp: updatedViewer.tabs[tabIndex].lastScreenshotTimestamp
+    });
+  } catch (error) {
+    logger.error(`Error taking tab screenshot: ${error.message}`);
+    res.status(500).json({ message: 'Error taking screenshot', error: error.message });
+  }
+};
+
+// Add a new tab to viewer
+exports.addTab = async (req, res) => {
+  try {
+    const { id: viewerId } = req.params;
+    
+    const viewer = await Viewer.findById(viewerId);
+    
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    if (viewer.status !== 'running') {
+      return res.status(400).json({ message: 'Viewer must be running to add a tab' });
+    }
+    
+    // Check if we've reached the maximum number of tabs
+    if (viewer.tabs.length >= viewer.maxTabs) {
+      return res.status(400).json({ 
+        message: `Cannot add more tabs. Maximum of ${viewer.maxTabs} tabs allowed.` 
+      });
+    }
+    
+    // Add a new tab using puppeteer service
+    await puppeteerService.addViewerTab(viewerId);
+    
+    // Get updated viewer
+    const updatedViewer = await Viewer.findById(viewerId);
+    
+    res.status(200).json({
+      message: 'Tab added successfully',
+      tabs: updatedViewer.tabs
+    });
+  } catch (error) {
+    logger.error(`Error adding tab: ${error.message}`);
+    res.status(500).json({ message: 'Error adding tab', error: error.message });
+  }
+};
+
+// Close a tab
+exports.closeTab = async (req, res) => {
+  try {
+    const { id: viewerId } = req.params;
+    const { tabIndex } = req.body;
+    
+    const viewer = await Viewer.findById(viewerId);
+    
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    if (viewer.status !== 'running') {
+      return res.status(400).json({ message: 'Viewer must be running to close a tab' });
+    }
+    
+    // Validate tab index
+    if (tabIndex === undefined || tabIndex < 0 || tabIndex >= viewer.tabs.length) {
+      return res.status(400).json({ message: 'Invalid tab index' });
+    }
+    
+    // Don't allow closing the last tab
+    if (viewer.tabs.length <= 1) {
+      return res.status(400).json({ message: 'Cannot close the last tab. Stop the viewer instead.' });
+    }
+    
+    // Close the tab
+    await puppeteerService.closeViewerTab(viewerId, tabIndex);
+    
+    // Get updated viewer
+    const updatedViewer = await Viewer.findById(viewerId);
+    
+    res.status(200).json({
+      message: 'Tab closed successfully',
+      tabs: updatedViewer.tabs
+    });
+  } catch (error) {
+    logger.error(`Error closing tab: ${error.message}`);
+    res.status(500).json({ message: 'Error closing tab', error: error.message });
+  }
+};
+
+// Get tab statistics
+exports.getTabStats = async (req, res) => {
+  try {
+    const { id: viewerId } = req.params;
+    
+    const viewer = await Viewer.findById(viewerId);
+    
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    if (viewer.status !== 'running') {
+      return res.status(400).json({ message: 'Viewer is not running' });
+    }
+    
+    // Get tab statistics
+    const tabStats = await puppeteerService.getViewerTabStats(viewerId);
+    
+    res.status(200).json(tabStats);
+  } catch (error) {
+    logger.error(`Error getting tab stats: ${error.message}`);
+    res.status(500).json({ message: 'Error getting tab stats', error: error.message });
+  }
+};
+
+// Force lowest quality for a specific tab
+exports.forceTabLowestQuality = async (req, res) => {
+  try {
+    const { id: viewerId } = req.params;
+    const { tabIndex } = req.body;
+    
+    const viewer = await Viewer.findById(viewerId);
+    
+    if (!viewer) {
+      return res.status(404).json({ message: 'Viewer not found' });
+    }
+    
+    if (viewer.status !== 'running') {
+      return res.status(400).json({ message: 'Viewer is not running' });
+    }
+    
+    // Validate tab index
+    if (tabIndex === undefined || tabIndex < 0 || tabIndex >= viewer.tabs.length) {
+      return res.status(400).json({ message: 'Invalid tab index' });
+    }
+    
+    // Force lowest quality for the tab
+    await puppeteerService.forceTabLowestQuality(viewerId, tabIndex);
+    
+    res.status(200).json({
+      message: `Forced lowest quality for tab ${tabIndex}`
+    });
+  } catch (error) {
+    logger.error(`Error forcing lowest quality: ${error.message}`);
+    res.status(500).json({ message: 'Error forcing lowest quality', error: error.message });
   }
 };

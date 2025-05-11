@@ -687,8 +687,104 @@ async function applyMobileFingerprinting(page, fingerprint) {
   });
 }
 
+/**
+ * Launch a browser with specific fingerprint settings
+ * @param {string} viewerId - ID of the viewer
+ * @param {Object} fingerprint - Fingerprint configuration
+ * @returns {Promise<Object>} - Puppeteer browser instance
+ */
+async function launchBrowserWithFingerprint(viewerId, fingerprint) {
+  // Enhanced launch options specifically for Kick.com
+  const launchOptions = {
+    headless: config.puppeteer.headless,
+    executablePath: '/usr/bin/chromium-browser',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      // Mobile features for better compatibility
+      '--enable-features=NetworkService,NetworkServiceInProcess',
+      '--disable-features=IsolateOrigins,site-per-process',
+      // Allow WebGL and similar features that Kick.com needs
+      '--ignore-gpu-blocklist',
+      '--enable-gpu-rasterization',
+      '--enable-zero-copy',
+      // Set mobile viewport
+      `--window-size=${fingerprint.screenResolution.width},${fingerprint.screenResolution.height}`,
+      // Mobile emulation essentials
+      '--touch-events=enabled',
+      '--enable-touch-drag-drop',
+      '--enable-touchpad-smooth-scrolling',
+      // Media playback features
+      '--autoplay-policy=no-user-gesture-required',
+      '--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies',
+      // Don't block media
+      '--allow-running-insecure-content',
+      '--autoplay-policy=user-gesture-required',
+      // Other essential configs
+      '--disable-extensions',
+      '--mute-audio',
+      '--no-default-browser-check',
+      '--no-first-run',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-breakpad',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-ipc-flooding-protection',
+      '--disable-site-isolation-trials',
+      '--disable-blink-features=AutomationControlled',
+      '--ignore-certificate-errors',
+      // Enable improved media handling for mobile
+      '--enable-features=HandwritingRecognition,OverlayScrollbar,OverscrollHistoryNavigation',
+      `--user-agent=${fingerprint.userAgent}`
+    ],
+    ignoreHTTPSErrors: true,
+    defaultViewport: {
+      width: fingerprint.screenResolution.width,
+      height: fingerprint.screenResolution.height,
+      deviceScaleFactor: fingerprint.isIOS ? 3 : 2.75,
+      hasTouch: true,
+      isLandscape: fingerprint.isLandscape,
+      isMobile: true
+    },
+    timeout: 60000 // 60 second timeout for browser launch
+  };
+
+  logger.info(`Launching browser for viewer ${viewerId} with ${fingerprint.browserName} fingerprint`);
+  
+  // Add device specific handling for iOS
+  if (fingerprint.isIOS) {
+    launchOptions.args.push('--enable-features=Translate');
+  }
+
+  // Launch browser
+  const browser = await require('puppeteer-extra').launch(launchOptions);
+  
+  // Add error handling for unexpected browser disconnection
+  browser.on('disconnected', () => {
+    logger.error(`Browser disconnected unexpectedly for viewer ${viewerId}`);
+  });
+  
+  return browser;
+}
+
+/**
+ * Launch a browser with randomized fingerprint settings
+ * @param {string} viewerId - ID of the viewer
+ * @returns {Promise<Object>} - Puppeteer browser instance
+ */
+async function launchBrowserWithRandomFingerprint(viewerId) {
+  // Generate random mobile fingerprint
+  const randomFingerprint = generateMobileFingerprint();
+  return launchBrowserWithFingerprint(viewerId, randomFingerprint);
+}
+
 module.exports = {
   getTimezoneString,
   generateMobileFingerprint,
-  applyMobileFingerprinting
+  applyMobileFingerprinting,
+  launchBrowserWithFingerprint,
+  launchBrowserWithRandomFingerprint
 };

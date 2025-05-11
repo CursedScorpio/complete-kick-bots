@@ -25,6 +25,42 @@ const ViewerSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  maxTabs: {
+    type: Number,
+    default: 1,
+    min: 1,
+    max: 10
+  },
+  tabs: [{
+    index: Number,
+    status: {
+      type: String,
+      enum: ['idle', 'loading', 'running', 'error'],
+      default: 'idle'
+    },
+    lastScreenshotUrl: {
+      type: String,
+      default: null,
+    },
+    lastScreenshotTimestamp: {
+      type: Date,
+      default: null,
+    },
+    playbackStatus: {
+      isPlaying: {
+        type: Boolean,
+        default: false,
+      },
+      resolution: String,
+      quality: String,
+      buffering: Boolean,
+      volume: Number,
+    },
+    error: {
+      type: String,
+      default: null,
+    },
+  }],
   browserFingerprint: {
     userAgent: String,
     platform: String,

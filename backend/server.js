@@ -43,6 +43,12 @@ app.use('/api/vpn', vpnRoutes);
 app.use('/api/streams', streamRoutes);
 app.use('/api/system', systemRoutes);
 
+// Serve screenshots directory as static
+app.use('/api/viewers/screenshots', express.static(path.join(__dirname, 'screenshots')));
+
+// Also serve the screenshots directly from root path for compatibility
+app.use('/screenshots', express.static(path.join(__dirname, 'screenshots')));
+
 // Direct health check route for Docker
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });

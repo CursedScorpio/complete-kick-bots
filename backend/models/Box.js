@@ -27,6 +27,12 @@ const BoxSchema = new mongoose.Schema({
     min: 1,
     max: 50,
   },
+  defaultMaxTabs: {
+    type: Number,
+    default: 1,
+    min: 1,
+    max: 10,
+  },
   ipAddress: {
     type: String,
     default: null,
