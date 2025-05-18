@@ -127,9 +127,6 @@ npm start
 - The system confirms whether the VPN connects and identifies its geolocation.
 - **When running VPN tests, check logs in `backend/temp/` for connection details and errors.**
 
-### Environment Variables
-- See `.env.example` for all available settings.
-
 ### MongoDB
 - Make sure MongoDB is running and accessible from the backend.
 
@@ -146,13 +143,12 @@ npm start
 **No viewers launching?**
 - Is Puppeteer installed correctly?
 - Is Chrome/Chromium available on your system?
-- Are VPN configs tested and valid (not already in use)?
 - Look at the backend logs for crash info.
 
 **Frontend not loading?**
 - Did you install frontend dependencies?
 - Is the backend running on port 5000?
-- Check browser console for network errors.
+- Check frontend logs for any issues.
 
 ---
 
