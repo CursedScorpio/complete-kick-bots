@@ -1,5 +1,33 @@
+# Node.js
 node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment variables
 .env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Application specific
 backend/screenshots/
-backend/logs
-backend/temp
+backend/logs/
+backend/temp/
+screenshots/
+logs/
+data/
+vpn/
+
+# IDE and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build files
+dist/
+build/
+frontend/build/
