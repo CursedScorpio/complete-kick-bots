@@ -31,3 +31,5 @@ vpn/
 dist/
 build/
 frontend/build/
+
+temp/

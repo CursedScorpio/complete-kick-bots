@@ -125,6 +125,7 @@ npm start
 ### VPN Verification
 - All `.ovpn` configs must be tested first.
 - The system confirms whether the VPN connects and identifies its geolocation.
+- **When running VPN tests, check logs in `backend/temp/` for connection details and errors.**
 
 ### Environment Variables
 - See `.env.example` for all available settings.
